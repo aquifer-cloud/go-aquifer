@@ -2,164 +2,29 @@ package aquifer
 
 import (
 	"fmt"
-	"time"
 	"sync"
-	"bytes"
+    "sync/atomic"
 	"context"
-	"encoding/json"
 
     "github.com/google/uuid"
     "github.com/rs/zerolog"
     "github.com/rs/zerolog/log"
+    "github.com/mitchellh/hashstructure/v2"
+    "github.com/elliotchance/orderedmap/v2"
 )
 
-type Record struct {
+const (
+	Record int8 = 1
+	SnapshotComplete = 2
+    StateUpdate = 3
+	SchemaUpdate = 4
+)
+
+type OutputMessage struct {
+	Type int8
 	RelativePath string
 	Data map[string]interface{}
 	SnapshotVersion int
-}
-
-type DataBatch struct {
-	*AquiferFile
-	logger *zerolog.Logger
-	snapshotVersion int
-	stateSequence int
-	relativePath string
-	jsonSchema map[string]interface{}
-	maxCount int
-	maxByteSize int
-	recordsBuffer bytes.Buffer
-	count int
-}
-
-func NewDataBatch(service *AquiferService,
-				  logger *zerolog.Logger,
-				  ctx context.Context,
-				  source Dict,
-				  accountId uuid.UUID,
-				  entityType string,
-				  entityId uuid.UUID,
-				  relativePath string,
-				  jsonSchema map[string]interface{},
-				  snapshotVersion int) (*DataBatch) {
-
-	dataBatch := &DataBatch{
-		AquiferFile: NewAquiferFile(service,
-									ctx,
-									"wb",
-									true,
-									"data-batch",
-									accountId,
-									entityType,
-									entityId,
-									uuid.New()),
-		logger: logger,
-		snapshotVersion: snapshotVersion,
-		relativePath: relativePath,
-		jsonSchema: jsonSchema,
-		// TODO: make maxCount and maxByteSize settable
-		maxCount: 1000000,
-		maxByteSize: 1024 * 1024 * 16,
-		count: 0,
-	}
-
-	getAttributes := func (file *AquiferFile) (attributes Dict, err error) {
-		attributes = make(Dict).
-			Set("source", source).
-			SetString("idempotent_id", file.fileId.String()).
-			SetInt("sequence", int(time.Now().Unix())).
-			SetString("relative_path", relativePath).
-			Set("json_schema", jsonSchema).
-			SetInt("count", dataBatch.GetCount())
-
-		if snapshotVersion > 0 {
-			attributes = attributes.SetInt("snapshot_version", snapshotVersion)
-		}
-
-		return
-	}
-
-	dataBatch.SetAttributesFn(getAttributes)
-
-	return dataBatch
-}
-
-func (databatch *DataBatch) GetId() uuid.UUID {
-	return databatch.fileId
-}
-
-func (databatch *DataBatch) GetRelativePath() string {
-	return databatch.relativePath
-}
-
-func (databatch *DataBatch) GetCount() int {
-	return databatch.count
-}
-
-func (databatch *DataBatch) IsFull() bool {
-	return databatch.count >= databatch.maxCount ||
-		   databatch.GetSize() >= databatch.maxByteSize
-}
-
-func (databatch *DataBatch) AddRecord(record map[string]interface{}, stateSequence int) (err error) {
-	var recordsBytes []byte
-	recordsBytes, err = json.Marshal(record)
-	if err != nil {
-		return
-	}
-
-	_, err = databatch.recordsBuffer.Write(recordsBytes)
-	if err != nil {
-		return
-	}
-	_, err = databatch.recordsBuffer.Write([]byte{'\n'})
-	if err != nil {
-		return
-	}
-
-	databatch.count += 1
-	databatch.stateSequence = stateSequence
-
-	if databatch.recordsBuffer.Len() >= databatch.chunkSize {
-		err = databatch.flushRecords()
-	}
-	return
-}
-
-func (databatch *DataBatch) Complete() (err error) {
-	databatch.logger.
-		Info().
-		Str("batch_id", databatch.GetId().String()).
-		Str("relative_path", databatch.GetRelativePath()).
-		Int("count", databatch.GetCount()).
-		Msg("Completing DataBatch")
-
-	err = databatch.flushRecords()
-	if err != nil {
-		return
-	}
-	err = databatch.AquiferFile.Close()
-	if err != nil {
-		return
-	}
-
-	databatch.logger.
-		Info().
-		Str("batch_id", databatch.GetId().String()).
-		Str("relative_path", databatch.GetRelativePath()).
-		Int("count", databatch.GetCount()).
-		Msg("Completed DataBatch")
-
-	return
-}
-
-func (databatch *DataBatch) Cancel() error {
-	return databatch.AquiferFile.Cancel()
-}
-
-func (databatch *DataBatch) flushRecords() (err error) {
-	_, err = databatch.recordsBuffer.WriteTo(databatch)
-	return
 }
 
 type DataOutputStream struct {
@@ -167,19 +32,26 @@ type DataOutputStream struct {
     logger *zerolog.Logger
     ctx context.Context
     source Dict
-    accountId uuid.UUID
+    job JobInterface
     entityType string
     entityId uuid.UUID
     metricsSource string
     schemas map[string](map[string]interface{})
     schemasLock sync.Mutex
-    messageSequence int
+    workerCounter uint64
+    messageSequence uint64
+    currentBatches sync.Map
+    flushedState map[string]interface{}
+    states *orderedmap.OrderedMap[uint64, map[string]interface{}]
+    nextState map[string]interface{}
+    nextStateHash uint64
+    stateLock sync.Mutex
 }
 
 func NewDataOutputStream(service *AquiferService,
 						 ctx context.Context,
 						 source Dict,
-	                     accountId uuid.UUID,
+	                     job JobInterface,
 	                     entityType string,
     					 entityId uuid.UUID,
     	                 metricsSource string) (*DataOutputStream) {
@@ -188,14 +60,22 @@ func NewDataOutputStream(service *AquiferService,
 		logger: log.Ctx(ctx),
 		ctx: ctx,
 		source: source,
-		accountId: accountId,
+		job: job,
 		entityType: entityType,
 		entityId: entityId,
 		metricsSource: metricsSource,
 		schemas: make(map[string](map[string]interface{})),
-		messageSequence: 0,
+        states: orderedmap.NewOrderedMap[uint64, map[string]interface{}](),
 	}
 	return &outputstream
+}
+
+func (outputstream *DataOutputStream) GetState() map[string]interface{} {
+    return outputstream.flushedState
+}
+
+func (outputstream *DataOutputStream) GetNextState() map[string]interface{} {
+    return outputstream.nextState
 }
 
 func (outputstream *DataOutputStream) HasSchema(relativePath string) (found bool) {
@@ -217,79 +97,196 @@ func (outputstream *DataOutputStream) GetSchema(relativePath string) map[string]
 	return outputstream.schemas[relativePath]
 }
 
-func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-chan Record) (err error) {
-	currentBatches := make(map[string](*DataBatch))
+func (outputstream *DataOutputStream) FetchState() (err error) {
+    outputstream.stateLock.Lock()
+    defer outputstream.stateLock.Unlock()
 
-	moreRecords := true
-	for moreRecords {
-		var record Record
+    // TODO: actually fetch state
+    outputstream.flushedState = make(map[string]interface{})
+    outputstream.nextState = make(map[string]interface{})
+    return
+}
+
+func (outputstream *DataOutputStream) UpdateStateByRelativePath(relativePath string, value map[string]interface{}, messageSequence uint64) (err error) {
+    outputstream.stateLock.Lock()
+    defer outputstream.stateLock.Unlock()
+
+    // TODO: copy? in case Hash() fails?
+    outputstream.nextState[relativePath] = value
+
+    var newStateHash uint64
+    newStateHash, err = hashstructure.Hash(outputstream.nextState, hashstructure.FormatV2, nil)
+    if err != nil {
+        return
+    }
+
+    if outputstream.nextStateHash != newStateHash {
+        outputstream.states.Set(messageSequence, outputstream.nextState)
+        outputstream.nextStateHash = newStateHash
+    }
+
+    return
+}
+
+func (outputstream *DataOutputStream) FlushState(force bool) (err error) {
+    outputstream.stateLock.Lock()
+    defer outputstream.stateLock.Unlock()
+
+    if !force {
+        var minBatchSequence uint64 = 0
+        batchCount := 0
+        outputstream.currentBatches.Range(func(key, value any) bool {
+            batchCount += 1
+            messageSequence := value.(*DataBatch).GetFirstMessageSequence()
+            if minBatchSequence == 0 || minBatchSequence > messageSequence {
+                minBatchSequence = messageSequence
+            }
+            return true
+        })
+        var maxStateSequenceMatch uint64 = 0
+        if batchCount > 0 {
+            for _, currStateSequence := range outputstream.states.Keys() {
+                if currStateSequence < minBatchSequence && currStateSequence > maxStateSequenceMatch {
+                    maxStateSequenceMatch = currStateSequence
+                }
+            }
+        }
+
+        if batchCount == 0 || maxStateSequenceMatch > 0 {
+            var newState map[string]interface{}
+            if batchCount == 0 {
+                newState = outputstream.states.Back().Value
+            } else {
+                newState, _ = outputstream.states.Get(maxStateSequenceMatch)
+            }
+
+            err = outputstream.doFlush(newState)
+            if err != nil {
+                return
+            }
+            outputstream.flushedState = newState
+            for _, currStateSequence := range outputstream.states.Keys() {
+                if currStateSequence <= maxStateSequenceMatch {
+                    outputstream.states.Delete(currStateSequence)
+                }
+            }
+        }
+    } else {
+        err = outputstream.doFlush(outputstream.nextState)
+        if err != nil {
+            return
+        }
+        outputstream.flushedState = outputstream.nextState
+        outputstream.states = orderedmap.NewOrderedMap[uint64, map[string]interface{}]()
+    }
+    return
+}
+
+func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-chan OutputMessage) (err error) {
+	workerBatches := make(map[string](DataBatchInterface))
+    workerId := atomic.AddUint64(&outputstream.workerCounter, 1)
+
+	moreMessages := true
+	for moreMessages {
+		var message OutputMessage
 		select {
         case <-ctx.Done():
-            for _, dataBatch := range currentBatches {
+            for _, dataBatch := range workerBatches {
 				dataBatch.Cancel()
 			}
 			return
-        case record, moreRecords = <-outputChan:
+        case message, moreMessages = <-outputChan:
         	if ctx.Err() != nil {
                 return
             }
-            if !moreRecords {
+            if !moreMessages {
             	continue
             }
 
-        	relativePath := record.RelativePath
-			if !outputstream.HasSchema(relativePath) {
-				err = fmt.Errorf("Error schema not found: %s", relativePath)
-				return
-			}
+            currentMessageSequence := atomic.AddUint64(&outputstream.messageSequence, 1)
 
-			dataBatch, batchFound := currentBatches[relativePath]
-			if !batchFound || dataBatch.snapshotVersion != record.SnapshotVersion {
-				if dataBatch != nil && dataBatch.snapshotVersion != record.SnapshotVersion {
-					err = dataBatch.Complete()
-					if err != nil {
-						return
-					}
-				}
+            if message.Type == Record {
+                relativePath := message.RelativePath
+                if !outputstream.HasSchema(relativePath) {
+                    err = fmt.Errorf("Error schema not found: %s", relativePath)
+                    return
+                }
 
-				outputstream.logger.Info().Msgf("New DataBatch: %s", relativePath)
+    			dataBatch, batchFound := workerBatches[relativePath]
+    			if !batchFound || dataBatch.GetSnapshotVersion() != message.SnapshotVersion {
+    				if dataBatch != nil && dataBatch.GetSnapshotVersion() != message.SnapshotVersion {
+    					err = dataBatch.Complete()
+    					if err != nil {
+    						return
+    					}
+    				}
 
-				jsonSchema := outputstream.GetSchema(relativePath)
-				dataBatch = NewDataBatch(outputstream.service,
-										 outputstream.logger,
-										 outputstream.ctx,
-										 outputstream.source,
-										 outputstream.accountId,
-										 outputstream.entityType,
-										 outputstream.entityId,
-										 relativePath,
-										 jsonSchema,
-										 record.SnapshotVersion)
-				currentBatches[relativePath] = dataBatch
-			}
+    				outputstream.logger.Info().Msgf("New DataBatch: %s", relativePath)
 
-			//outputstream.messageSequence += 1 // TODO: threaded counter
-			err = dataBatch.AddRecord(record.Data, outputstream.messageSequence)
-			if err != nil {
-				return
-			}
+    				jsonSchema := outputstream.GetSchema(relativePath)
+    				dataBatch = NewDataBatch(outputstream.service,
+    										 outputstream.logger,
+    										 outputstream.ctx,
+    										 outputstream.source,
+    										 outputstream.job.GetAccountId(),
+    										 outputstream.entityType,
+    										 outputstream.entityId,
+    										 relativePath,
+    										 jsonSchema,
+    										 message.SnapshotVersion)
+    				workerBatches[relativePath] = dataBatch
+                    outputstream.currentBatches.Store(
+                        fmt.Sprintf("%d%s", workerId, relativePath),
+                        dataBatch)
+    			}
 
-			if dataBatch.IsFull() {
-				outputstream.logger.Info().Msgf("Full DataBatch: %s", relativePath)
-				err = dataBatch.Complete()
-				if err != nil {
-					return
-				}
-				delete(currentBatches, relativePath)
-			}
+    			err = dataBatch.AddRecord(message.Data, currentMessageSequence)
+    			if err != nil {
+    				return
+    			}
+
+    			if dataBatch.IsFull() {
+    				outputstream.logger.Info().Msgf("Full DataBatch: %s", relativePath)
+    				err = dataBatch.Complete()
+    				if err != nil {
+    					return
+    				}
+    				delete(workerBatches, relativePath)
+                    outputstream.currentBatches.Delete(fmt.Sprintf("%d%s", workerId, relativePath))
+    			}
+            } else if message.Type == StateUpdate {
+                err = outputstream.UpdateStateByRelativePath(message.RelativePath,
+                                                             message.Data,
+                                                             currentMessageSequence)
+                if err != nil {
+                    return
+                }
+                err = outputstream.FlushState(false)
+                if err != nil {
+                    return
+                }
+            } else if message.Type == SchemaUpdate {
+                // TODO: flush existing batch
+                outputstream.SetSchema(message.RelativePath, message.Data)
+            } else if message.Type == SnapshotComplete {
+                err = outputstream.CompleteSnapshot(message.RelativePath, message.SnapshotVersion)
+                if err != nil {
+                    return
+                }
+            } else {
+                err = fmt.Errorf("Unknown OutputMessage.Type: %d", message.Type)
+                return
+            }
 		}
 	}
 
-	for _, dataBatch := range currentBatches {
+	for _, dataBatch := range workerBatches {
 		err = dataBatch.Complete()
 		if err != nil {
 			return
 		}
+        outputstream.currentBatches.Delete(fmt.Sprintf(
+            "%d%s", workerId, dataBatch.GetRelativePath()))
 	}
 	return
 }
@@ -299,7 +296,7 @@ func (outputstream *DataOutputStream) CompleteSnapshot(relativePath string,
 	var token string
 	token, err = outputstream.service.GetEntityToken(
 		outputstream.ctx,
-		outputstream.accountId,
+		outputstream.job.GetAccountId(),
 		outputstream.entityType,
 		outputstream.entityId)
 	if err != nil {
@@ -318,8 +315,36 @@ func (outputstream *DataOutputStream) CompleteSnapshot(relativePath string,
 	_, err = outputstream.service.Request(
 		outputstream.ctx,
 		"POST",
-		fmt.Sprintf("/accounts/%s/snapshots", outputstream.accountId),
+		fmt.Sprintf("/accounts/%s/snapshots", outputstream.job.GetAccountId()),
 		reqData,
 		token)
 	return
+}
+
+func (outputstream *DataOutputStream) doFlush(state map[string]interface{}) (err error) {
+    var token string
+    token, err = outputstream.service.GetEntityToken(
+        outputstream.ctx,
+        outputstream.job.GetAccountId(),
+        outputstream.entityType,
+        outputstream.entityId)
+    if err != nil {
+        return
+    }
+
+    reqData := make(Dict).
+        Set("data", make(Dict).
+            SetString("type", "state").
+            Set("attributes", make(Dict).
+                Set("state", state)))
+
+    _, err = outputstream.service.Request(
+        outputstream.ctx,
+        "POST",
+        fmt.Sprintf("/accounts/%s/jobs/%s/state",
+            outputstream.job.GetAccountId(),
+            outputstream.job.GetId()),
+        reqData,
+        token)
+    return
 }

@@ -52,6 +52,9 @@ type JobInterface interface {
 	GetEntityType() string
 	GetEntityId() uuid.UUID
 	GetConfig() Dict
+    GetJobAttributes() Dict
+    GetDataBatch() DataBatchInterface
+    GetDataOutputStream() *DataOutputStream
 	Lock() error
 	Release(releaseStatus string, failureErrorId uuid.UUID) error
 	Touch() error
@@ -65,16 +68,10 @@ type FileJobInterface interface {
 type FileJob struct {
 	*AquiferJob
 	File *AquiferFile
-	DataOutputStream *DataOutputStream
-	relativePath string
 }
 
 func (fileJob *FileJob) GetFile() AquiferFileInterface {
 	return fileJob.File
-}
-
-func (fileJob *FileJob) GetRelativePath() string {
-	return fileJob.jobAttributes.GetString("relative_path")
 }
 
 func (fileJob *FileJob) GetSourcePath() string {
@@ -105,6 +102,10 @@ type AquiferJob struct {
 	service *AquiferService
 	ctx context.Context
 	logger *zerolog.Logger
+    dataBatch DataBatchInterface
+    dataBatchLock sync.Mutex
+	dataOutputStream *DataOutputStream
+    dataOutputStreamLock sync.Mutex
 	cancel func()
 	cancelTimer *time.Timer
 	timedout bool
@@ -115,6 +116,7 @@ type AquiferJob struct {
 	flowId uuid.UUID
 	jobType string
 	jobId uuid.UUID
+    relativePath string
 	jobAttributes Dict
 	entityAttributes Dict
 	lockId uuid.UUID
@@ -138,13 +140,6 @@ func NewAquiferJobFromEvent(service *AquiferService, ctx context.Context, event 
 }
 
 func NewFileJobFromEvent(service *AquiferService, ctx context.Context, event AquiferEvent) JobInterface {
-	source := make(Dict).
-		SetString("type", event.Destination.Type).
-		SetString("id", event.Destination.Id.String()).
-		SetString("flow_id", event.Destination.FlowId.String()).
-		SetString("job_type", event.Destination.JobType).
-		SetString("job_id", event.Destination.JobId.String())
-
 	jobCtx, jobCancel := context.WithCancel(ctx)
 
 	jobCtx = log.With().
@@ -182,13 +177,6 @@ func NewFileJobFromEvent(service *AquiferService, ctx context.Context, event Aqu
 					         event.Destination.Type,
 					         event.Destination.Id,
 					         event.Destination.JobId),
-		DataOutputStream: NewDataOutputStream(service,
-											  jobCtx,
-											  source,
-											  event.AccountId,
-											  event.Destination.Type,
-									          event.Destination.Id,
-									          "process"),
 	}
 	return &job
 }
@@ -263,6 +251,10 @@ func (job *AquiferJob) GetAccountId() uuid.UUID {
 	return job.accountId
 }
 
+func (fileJob *FileJob) GetRelativePath() string {
+    return fileJob.jobAttributes.GetString("relative_path")
+}
+
 func (job *AquiferJob) IsTimedout() bool {
 	return job.timedout
 }
@@ -285,6 +277,49 @@ func (job *AquiferJob) GetSchemas() Dict {
 
 func (job *AquiferJob) GetJobAttributes() Dict {
 	return job.jobAttributes
+}
+
+func (job *AquiferJob) GetDataBatch() DataBatchInterface {
+    job.dataBatchLock.Lock()
+    defer job.dataBatchLock.Unlock()
+
+    if job.dataBatch == nil {
+        job.dataBatch = ReadDataBatch(job)
+    }
+
+    return job.dataBatch
+}
+
+func (job *AquiferJob) GetDataOutputStream() *DataOutputStream {
+    job.dataOutputStreamLock.Lock()
+    defer job.dataOutputStreamLock.Unlock()
+
+    if job.dataOutputStream == nil {
+        source := make(Dict).
+            SetString("type", job.event.Destination.Type).
+            SetString("id", job.event.Destination.Id.String()).
+            SetString("flow_id", job.event.Destination.FlowId.String()).
+            SetString("job_type", job.event.Destination.JobType).
+            SetString("job_id", job.event.Destination.JobId.String())
+
+        metricsSource := "load"
+        if job.jobType == "extract" {
+            metricsSource = "extract"
+        } else if job.entityType == "processor" {
+            metricsSource = "process"
+        }
+
+        job.dataOutputStream = NewDataOutputStream(
+            job.service,
+            job.GetCtx(),
+            source,
+            job,
+            job.event.Destination.Type,
+            job.event.Destination.Id,
+            metricsSource)
+    }
+
+    return job.dataOutputStream
 }
 
 func (job *AquiferJob) Lock() (err error) {
