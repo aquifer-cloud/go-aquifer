@@ -1,14 +1,111 @@
 package aquifer
 
 import (
+    "fmt"
     "time"
     "bytes"
     "context"
+    "net/http"
 
     "github.com/google/uuid"
     "github.com/rs/zerolog"
     "github.com/rs/zerolog/log"
+    "github.com/jarcoal/httpmock"
 )
+
+func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
+    service := NewService("test-service")
+    httpmock.ActivateNonDefault(service.httpClient.GetClient())
+
+    httpmock.RegisterResponder(
+        "POST",
+        "=~.*/accounts/.*/token",
+        func(req *http.Request) (*http.Response, error) {
+            return httpmock.NewJsonResponse(
+                200,
+                map[string]interface{}{
+                    "data": map[string]interface{}{
+                        "attributes": map[string]interface{}{
+                            "deployment_entity_token": "foo",
+                        },
+                    },
+                })
+        })
+
+    httpmock.RegisterResponder(
+        "POST",
+        "=~.*/accounts/([^/]+)/([^/]+)/([^/]+)/lock",
+        func(req *http.Request) (*http.Response, error) {
+            // httpmock.MustGetSubmatch(req, )
+            return httpmock.NewJsonResponse(
+                200,
+                map[string]interface{}{
+                    "data": map[string]interface{}{
+                        "attributes": map[string]interface{}{
+                            "worker_lock_id": uuid.New().String(),
+                        },
+                    },
+                })
+        })
+
+    // httpmock.RegisterResponder(
+    //     "GET",
+    //     "=~.*/accounts/([^/]+)/(data|jobs|files)/([^/]+)",
+    //     func(req *http.Request) (*http.Response, error) {
+    //         return httpmock.NewJsonResponse(
+    //             200,
+    //             map[string]interface{}{
+    //                 "data": map[string]interface{}{
+    //                     "attributes": map[string]interface{}{
+    //                     },
+    //                 },
+    //             })
+    //     })
+
+    httpmock.RegisterResponder(
+        "GET",
+        "=~.*/accounts/([^/]+)/(data|jobs|files|datastores|blobstores|integrations|processors)/([^/]+)",
+        func(req *http.Request) (resp *http.Response, err error) {
+            var entityType string
+            entityType, err = httpmock.GetSubmatch(req, 2)
+            if err != nil {
+                return
+            }
+
+            var entityId string
+            entityId, err = httpmock.GetSubmatch(req, 3)
+            if err != nil {
+                return
+            }
+
+            var found bool
+            var entities map[string]interface{}
+            var entity interface{}
+            entities, found = mockDb[entityType]
+            if found {
+                entity, found = entities[entityId]
+            }
+            if !found {
+                return httpmock.NewJsonResponse(
+                    404,
+                    map[string]interface{}{})
+            }
+
+            return httpmock.NewJsonResponse(
+                200,
+                map[string]interface{}{
+                    "data": map[string]interface{}{
+                        "id": entityId,
+                        "attributes": entity,
+                    },
+                })
+        })
+
+    // httpmock.RegisterNoResponder(
+    //     httpmock.NewStringResponder(500, "Mock route not found"))
+
+    return service
+}
 
 type MockDataBatch struct {
     data []map[string]interface{}
@@ -80,7 +177,7 @@ func (databatch *MockDataBatch) IsFull() bool {
     return false
 }
 
-func (databatch *MockDataBatch) AddRecord(record map[string]interface{}, stateSequence int) (err error) {
+func (databatch *MockDataBatch) AddRecord(record map[string]interface{}, stateSequence uint64) (err error) {
     return
 }
 
@@ -103,6 +200,7 @@ func (databatch *MockDataBatch) NextRecord() (record map[string]interface{}, exi
 }
 
 type MockJob struct {
+    service *AquiferService
     accountId uuid.UUID
     jobType string
     jobId uuid.UUID
@@ -114,8 +212,9 @@ type MockJob struct {
     databatch DataBatchInterface
 }
 
-func NewMockJob(config map[string]interface{}) *MockJob {
+func NewMockJob(config map[string]interface{}, service *AquiferService) *MockJob {
     return &MockJob{
+        service: service,
         config: config,
     }
 }
@@ -198,4 +297,9 @@ func (job *MockJob) GetDataBatch() DataBatchInterface {
 
 func (job *MockJob) GetDataOutputStream() *DataOutputStream {
     return nil
+}
+
+func (job *MockJob) GetExtracts() (extracts []*Extract, err error) {
+    err = fmt.Errorf("GetExtracts not implemented")
+    return
 }

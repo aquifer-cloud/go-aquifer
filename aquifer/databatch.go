@@ -265,7 +265,7 @@ func (databatch *DataBatch) NextRecord() (record map[string]interface{}, exists 
             line = append(databatch.readCurrentLine, line...)
         }
         var lineRecord map[string]interface{}
-        err = json.Unmarshal(line, &lineRecord)
+        err = Unmarshal(line, &lineRecord)
         if err != nil {
             return
         }

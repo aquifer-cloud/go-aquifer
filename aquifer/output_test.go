@@ -3,26 +3,90 @@ package aquifer
 import (
     "fmt"
     "testing"
+    "net/http"
 
+    "github.com/google/uuid"
     "github.com/rs/zerolog/log"
     "golang.org/x/sync/errgroup"
+    "github.com/jarcoal/httpmock"
     "github.com/elliotchance/orderedmap/v2"
 )
 
 func TestState(t *testing.T) {
     var err error
     config := make(map[string]interface{})
-    job := NewMockJob(config)
+    service := NewMockService()
+    job := NewMockJob(config, service)
     logger := log.With().Logger()
     dataOutputStream := &DataOutputStream{
+        service: service,
         ctx: job.GetCtx(),
         job: job,
         logger: &logger,
+        entityType: "integration",
         metricsSource: "extract",
         schemas: make(map[string](map[string]interface{})),
         states: orderedmap.NewOrderedMap[uint64, map[string]interface{}](),
         messageSequence: 1, // instead of usual 0
     }
+
+    httpmock.RegisterResponder(
+        "GET",
+        "=~.*/accounts/.*/state",
+        func(req *http.Request) (*http.Response, error) {
+            return httpmock.NewJsonResponse(
+                200,
+                map[string]interface{}{
+                    "data": map[string]interface{}{
+                        "attributes": map[string]interface{}{
+                            "state": map[string]interface{}{
+                                "foo": "bar",
+                            },
+                        },
+                    },
+                })
+        })
+
+    httpmock.RegisterResponder(
+        "POST",
+        "=~.*/accounts/.*/state",
+        func(req *http.Request) (*http.Response, error) {
+            return httpmock.NewJsonResponse(
+                200,
+                map[string]interface{}{
+                    "data": map[string]interface{}{
+                        "attributes": map[string]interface{}{
+                        },
+                    },
+                })
+        })
+
+    httpmock.RegisterResponder(
+        "POST",
+        "=~.*/accounts/.*/data/upload",
+        func(req *http.Request) (*http.Response, error) {
+            return httpmock.NewJsonResponse(
+                200,
+                map[string]interface{}{
+                    "data": map[string]interface{}{
+                        "id": uuid.New().String(),
+                        "attributes": map[string]interface{}{
+                            "upload_token": "mock-upload-token",
+                            "part_number": 1,
+                            "upload_url": "https://example.com/upload",
+                        },
+                    },
+                })
+        })
+
+    httpmock.RegisterResponder(
+        "PUT",
+        "https://example.com/upload",
+        func(req *http.Request) (*http.Response, error) {
+            response := httpmock.NewStringResponse(200, "Foo")
+            response.Header.Set("Etag", "fake-etag")
+            return response, nil
+        })
 
     err = dataOutputStream.FetchState()
     if err != nil {

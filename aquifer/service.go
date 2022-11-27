@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
     "github.com/rs/zerolog/log"
+    "github.com/urfave/cli/v2"
     "github.com/rs/zerolog/pkgerrors"
 	"github.com/go-resty/resty/v2"
 	"github.com/jellydator/ttlcache/v3"
@@ -39,7 +40,7 @@ type AquiferService struct {
 	extractHandler func(JobInterface) error
 }
 
-func InitService(deploymentName string) *AquiferService {
+func NewService(deploymentName string) *AquiferService {
 	baseUrl := getenv("AQUIFER_BASE_URL", DEFAULT_BASE_URL)
 	deploymentToken := os.Getenv("AQUIFER_TOKEN")
 	workerId := getenv("AQUIFER_WORKER_ID",
@@ -47,15 +48,18 @@ func InitService(deploymentName string) *AquiferService {
 
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 
+    httpClient := resty.New().
+        SetRetryCount(5).
+        SetRetryWaitTime(5 * time.Second).
+        SetRetryMaxWaitTime(30 * time.Second).
+        AddRetryCondition(
+            func(r *resty.Response, err error) bool {
+                return err != nil || r.StatusCode() >= 500
+            })
+    httpClient.JSONUnmarshal = Unmarshal
+
 	service := AquiferService{
-		httpClient: resty.New().
-			SetRetryCount(5).
-			SetRetryWaitTime(5 * time.Second).
-			SetRetryMaxWaitTime(30 * time.Second).
-			AddRetryCondition(
-		    func(r *resty.Response, err error) bool {
-		        return err != nil || r.StatusCode() >= 500
-		    }),
+		httpClient: httpClient,
 		baseUrl: baseUrl,
 		workerId: workerId,
 		deploymentName: deploymentName,
@@ -392,6 +396,100 @@ func (service *AquiferService) GetEntityPath(accountId uuid.UUID,
 		pathType,
 		entityId)
 	return
+}
+
+func (service *AquiferService) GetCli() *cli.App {
+    app := &cli.App{
+        Flags: []cli.Flag{
+            &cli.StringFlag{
+                Name: "base-url",
+                Usage: "Aquifer API base URL",
+                Value: DEFAULT_BASE_URL,
+                // EnvVars: "AQUIFER_BASE_URL",
+            },
+            &cli.StringFlag{
+                Name: "token",
+                Usage: "Aquifer deployment token",
+                // EnvVars: "AQUIFER_TOKEN",
+            },
+            &cli.StringFlag{
+                Name: "worker-id",
+                Usage: "Aquifer service worker ID",
+                // Value: fmt.Sprintf("%s-0", service.deploymentName),
+                // EnvVars: "AQUIFER_WORKER_ID",
+            },
+        },
+        Commands: []*cli.Command{
+            {
+                Name: "run-service",
+                Usage: "run as Aquifer service",
+                Action: func(cCtx *cli.Context) error {
+                    service.StartService()
+                    return nil
+                },
+            },
+            {
+                Name: "run-job",
+                Usage: "run an Aquifer job",
+                Flags: []cli.Flag{
+                    &cli.StringFlag{
+                        Name: "account-id",
+                        Usage: "Account ID for JOB",
+                        Required: true,
+                    },
+                    &cli.StringFlag{
+                        Name: "flow-id",
+                        Usage: "Flow ID for JOB",
+                        Required: true,
+                    },
+                    &cli.StringFlag{
+                        Name: "entity-type",
+                        Usage: "Entity type for JOB - integration, datastore, processor, or blobstore",
+                        Required: true,
+                    },
+                    &cli.StringFlag{
+                        Name: "entity-id",
+                        Usage: "Entity ID for JOB",
+                        Required: true,
+                    },
+                    &cli.StringFlag{ // TODO: use separate by-id command?
+                        Name: "job-id",
+                        Usage: "Run specific Job by ID",
+                    },
+                    &cli.BoolFlag{
+                        Name: "dry-run",
+                        Usage: "Entity ID for JOB",
+                    },
+                },
+                Subcommands: []*cli.Command{
+                    {
+                        Name:  "schema-sync",
+                        Usage: "schema sync job",
+                        Action: func(cCtx *cli.Context) error {
+                            fmt.Println("new task template: ", cCtx.Args().First())
+                            return nil
+                        },
+                    },
+                    {
+                        Name:  "extract",
+                        Usage: "extract job",
+                        Action: func(cCtx *cli.Context) error {
+                            fmt.Println("new task template: ", cCtx.Args().First())
+                            return nil
+                        },
+                    },
+                },
+            },
+        },
+    }
+    return app
+}
+
+func (service *AquiferService) RunCli() {
+    app := service.GetCli()
+    if err := app.Run(os.Args); err != nil {
+        log.Fatal().Err(err).Msg("Fatal error")
+    }
 }
 
 func (service *AquiferService) getEvents(ctx context.Context, maxEvents int) (events []AquiferEvent, err error) {

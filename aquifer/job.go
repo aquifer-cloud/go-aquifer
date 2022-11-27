@@ -58,6 +58,7 @@ type JobInterface interface {
 	Lock() error
 	Release(releaseStatus string, failureErrorId uuid.UUID) error
 	Touch() error
+    GetExtracts() ([]*Extract, error)
 }
 
 type FileJobInterface interface {
@@ -127,9 +128,7 @@ type AquiferJob struct {
 }
 
 func NewAquiferJobFromEvent(service *AquiferService, ctx context.Context, event AquiferEvent) (job JobInterface, err error) {
-	if event.Destination.JobType == "file" {
-		job = NewFileJobFromEvent(service, ctx, event)
-	} else if event.Destination.JobType == "data-batch" {
+	if event.Destination.JobType == "file" || event.Destination.JobType == "data-batch" {
 		job = NewFileJobFromEvent(service, ctx, event)
 	} else if event.Destination.JobType == "extract" {
 		job = NewExtractJobFromEvent(service, ctx, event)
@@ -497,6 +496,80 @@ func (job *AquiferJob) Touch() (err error) {
 		job.cancelTimer.Reset(job.GetTimeout())
 	}
 	return
+}
+
+type Extract struct {
+    Path string
+    RelativePath string
+    ExtractType string
+    OffsetField string
+    OffsetInterval float64
+    TargetJsonSchema map[string]interface{}
+    HashSalt string
+    HashAlgo string
+}
+
+func (job *AquiferJob) GetExtracts() (extracts []*Extract, err error) {
+    var token string
+    token, err = job.service.GetEntityToken(job.ctx, job.accountId, job.entityType, job.entityId)
+    if err != nil {
+        return
+    }
+
+    var data Dict
+    data, err = job.service.Request(
+        job.ctx,
+        "GET",
+        fmt.Sprintf("%s/extracts?include=stream,schema", job.getJobPath()),
+        nil,
+        token)
+    if err != nil {
+        return
+    }
+
+    includes := make(map[string]map[string]interface{})
+    for _, includeItem := range data.GetArray("included") {
+        includeItemMap := includeItem.(map[string]interface{})
+        itemType := includeItemMap["type"].(string)
+        if _, exists := includes[itemType]; !exists {
+            includes[itemType] = make(map[string]interface{})
+        }
+        itemId := includeItemMap["id"].(string)
+        includes[itemType][itemId] = includeItemMap
+    }
+
+    rawExtracts := data.GetArray("data")
+    extracts = make([]*Extract, len(rawExtracts))
+    for i, rawExtract := range rawExtracts {
+        rawExtractDict := rawExtract.(Dict)
+        rawExtractAttributes := rawExtractDict.Get("attributes")
+        offsetInterval, _ := rawExtractAttributes.GetFloat64("offset_interval")
+
+        streamId := rawExtractDict.
+            Get("relationships").
+            Get("stream").
+            Get("data").
+            GetString("id")
+        stream := includes["stream"][streamId].(Dict)
+        schemaId := stream.
+            Get("relationships").
+            Get("schema").
+            Get("data").
+            GetString("id")
+        schema := includes["schema"][schemaId].(Dict)
+
+        extracts[i] = &Extract{
+            Path: schema.GetString("path"),
+            RelativePath: schema.GetString("relative_path"),
+            ExtractType: rawExtractAttributes.GetString("extract_type"),
+            OffsetField: rawExtractAttributes.GetString("offset_field"),
+            OffsetInterval: offsetInterval,
+            TargetJsonSchema: rawExtractAttributes.Get("target_json_schema"),
+            HashSalt: stream.GetString("hash_salt"),
+            HashAlgo: stream.GetString("hash_algo"),
+        }
+    }
+    return
 }
 
 func (job *AquiferJob) getLockPrefix() string {

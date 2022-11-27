@@ -223,6 +223,9 @@ func (file *AquiferFile) Read(p []byte) (n int, err error) {
 		}
 
 		n, err = file.gzipReader.Read(p)
+		if err == io.EOF {
+			err = nil
+		}
 	} else {
 		if file.buffer.Len() == 0 && file.location == file.sizeBytes {
 			err = io.EOF

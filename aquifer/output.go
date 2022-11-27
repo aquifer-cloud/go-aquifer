@@ -9,6 +9,7 @@ import (
     "github.com/google/uuid"
     "github.com/rs/zerolog"
     "github.com/rs/zerolog/log"
+    "github.com/barkimedes/go-deepcopy"
     "github.com/mitchellh/hashstructure/v2"
     "github.com/elliotchance/orderedmap/v2"
 )
@@ -71,10 +72,14 @@ func NewDataOutputStream(service *AquiferService,
 }
 
 func (outputstream *DataOutputStream) GetState() map[string]interface{} {
+    outputstream.stateLock.Lock()
+    defer outputstream.stateLock.Unlock()
     return outputstream.flushedState
 }
 
 func (outputstream *DataOutputStream) GetNextState() map[string]interface{} {
+    outputstream.stateLock.Lock()
+    defer outputstream.stateLock.Unlock()
     return outputstream.nextState
 }
 
@@ -101,9 +106,40 @@ func (outputstream *DataOutputStream) FetchState() (err error) {
     outputstream.stateLock.Lock()
     defer outputstream.stateLock.Unlock()
 
-    // TODO: actually fetch state
-    outputstream.flushedState = make(map[string]interface{})
-    outputstream.nextState = make(map[string]interface{})
+    var token string
+    token, err = outputstream.service.GetEntityToken(
+        outputstream.ctx,
+        outputstream.job.GetAccountId(),
+        outputstream.entityType,
+        outputstream.entityId)
+    if err != nil {
+        return
+    }
+
+    var data Dict
+    data, err = outputstream.service.Request(
+        outputstream.ctx,
+        "GET",
+        fmt.Sprintf("/accounts/%s/jobs/%s/state",
+            outputstream.job.GetAccountId(),
+            outputstream.job.GetId()),
+        nil,
+        token)
+    if err != nil {
+        return
+    }
+
+    flushedState := data.Get("data").Get("attributes").Get("state").Map()
+
+    outputstream.flushedState = flushedState
+
+    var nextState interface{}
+    nextState, err = deepcopy.Anything(flushedState)
+    if err != nil {
+        return
+    }
+    outputstream.nextState = nextState.(map[string]interface{})
+
     return
 }
 
@@ -111,17 +147,24 @@ func (outputstream *DataOutputStream) UpdateStateByRelativePath(relativePath str
     outputstream.stateLock.Lock()
     defer outputstream.stateLock.Unlock()
 
-    // TODO: copy? in case Hash() fails?
-    outputstream.nextState[relativePath] = value
+    var newStateInterface interface{}
+    newStateInterface, err = deepcopy.Anything(outputstream.nextState)
+    if err != nil {
+        return
+    }
+    newState := newStateInterface.(map[string]interface{})
+
+    newState[relativePath] = value
 
     var newStateHash uint64
-    newStateHash, err = hashstructure.Hash(outputstream.nextState, hashstructure.FormatV2, nil)
+    newStateHash, err = hashstructure.Hash(newState, hashstructure.FormatV2, nil)
     if err != nil {
         return
     }
 
     if outputstream.nextStateHash != newStateHash {
-        outputstream.states.Set(messageSequence, outputstream.nextState)
+        outputstream.states.Set(messageSequence, newState)
+        outputstream.nextState = newState
         outputstream.nextStateHash = newStateHash
     }
 
