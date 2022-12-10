@@ -52,6 +52,8 @@ type JobInterface interface {
 	GetEntityType() string
 	GetEntityId() uuid.UUID
 	GetConfig() Dict
+    GetSnapshotVersion() int
+    GetHyperbatchId() uuid.UUID
     GetJobAttributes() Dict
     GetDataBatch() DataBatchInterface
     GetDataOutputStream() *DataOutputStream
@@ -252,6 +254,17 @@ func (job *AquiferJob) GetAccountId() uuid.UUID {
 
 func (fileJob *FileJob) GetRelativePath() string {
     return fileJob.jobAttributes.GetString("relative_path")
+}
+
+func (job *AquiferJob) GetSnapshotVersion() int {
+    snapshotVersion, _ := job.entityAttributes.GetInt("snapshot_version")
+    return snapshotVersion
+}
+
+func (job *AquiferJob) GetHyperbatchId() uuid.UUID {
+    hyperbatchIdStr := job.entityAttributes.GetString("hyperbatch_id")
+    hyperbatchId, _ := uuid.Parse(hyperbatchIdStr)
+    return hyperbatchId
 }
 
 func (job *AquiferJob) IsTimedout() bool {

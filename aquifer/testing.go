@@ -287,6 +287,14 @@ func (job *MockJob) GetJobAttributes() Dict {
     return Dict{}
 }
 
+func (job *MockJob) GetSnapshotVersion() int {
+    return 0
+}
+
+func (job *MockJob) GetHyperbatchId() uuid.UUID {
+    return uuid.Nil
+}
+
 func (job *MockJob) SetDataBatch(databatch DataBatchInterface) {
     job.databatch = databatch
 }
