@@ -35,9 +35,13 @@ type AquiferService struct {
 	deploymentName string
 	deploymentToken string
 	tokenCache *ttlcache.Cache[string, string]
+    connectionTestHandler func(JobInterface) error
 	fileHandler func(JobInterface) error
 	dataHandler func(JobInterface) error
+    snapshotCompleteHandler func(JobInterface) error
+    hyperbatchCompleteHandler func(JobInterface) error
 	extractHandler func(JobInterface) error
+    schemaSyncHandler func(JobInterface) error
 }
 
 func NewService(deploymentName string) *AquiferService {
@@ -303,6 +307,10 @@ func (service *AquiferService) RunJob(ctx context.Context, doneChan chan<- bool,
 	}
 }
 
+func (service *AquiferService) SetConnectionTestHandler(fn func(JobInterface) error) {
+    service.connectionTestHandler = fn
+}
+
 func (service *AquiferService) SetFileHandler(fn func(JobInterface) error) {
 	service.fileHandler = fn
 }
@@ -311,8 +319,20 @@ func (service *AquiferService) SetDataHandler(fn func(JobInterface) error) {
 	service.dataHandler = fn
 }
 
+func (service *AquiferService) SetSnapshotCompleteHandler(fn func(JobInterface) error) {
+    service.snapshotCompleteHandler = fn
+}
+
+func (service *AquiferService) SetHyperbatchCompleteHandler(fn func(JobInterface) error) {
+    service.hyperbatchCompleteHandler = fn
+}
+
 func (service *AquiferService) SetExtractHandler(fn func(JobInterface) error) {
 	service.extractHandler = fn
+}
+
+func (service *AquiferService) SetSchemaSyncHandler(fn func(JobInterface) error) {
+    service.schemaSyncHandler = fn
 }
 
 func (service *AquiferService) Request(ctx context.Context,
@@ -399,6 +419,11 @@ func (service *AquiferService) GetEntityPath(accountId uuid.UUID,
 }
 
 func (service *AquiferService) GetCli() *cli.App {
+    dryRunFlag := &cli.BoolFlag{
+        Name: "dry-run",
+        Usage: "Dry Run - Do not perform write operations",
+    }
+
     app := &cli.App{
         Flags: []cli.Flag{
             &cli.StringFlag{
@@ -429,50 +454,124 @@ func (service *AquiferService) GetCli() *cli.App {
                 },
             },
             {
-                Name: "run-job",
+                Name: "run-job-by-id",
                 Usage: "run an Aquifer job",
                 Flags: []cli.Flag{
                     &cli.StringFlag{
                         Name: "account-id",
-                        Usage: "Account ID for JOB",
+                        Usage: "Account ID for Job",
                         Required: true,
                     },
                     &cli.StringFlag{
-                        Name: "flow-id",
-                        Usage: "Flow ID for JOB",
+                        Name: "job-type",
+                        Usage: "Job Type",
                         Required: true,
                     },
                     &cli.StringFlag{
-                        Name: "entity-type",
-                        Usage: "Entity type for JOB - integration, datastore, processor, or blobstore",
-                        Required: true,
-                    },
-                    &cli.StringFlag{
-                        Name: "entity-id",
-                        Usage: "Entity ID for JOB",
-                        Required: true,
-                    },
-                    &cli.StringFlag{ // TODO: use separate by-id command?
                         Name: "job-id",
-                        Usage: "Run specific Job by ID",
+                        Usage: "Job ID",
+                        Required: true,
                     },
-                    &cli.BoolFlag{
-                        Name: "dry-run",
-                        Usage: "Entity ID for JOB",
-                    },
+                    dryRunFlag,
                 },
+                Action: func(cCtx *cli.Context) error {
+                    return nil
+                },
+            },
+            {
+                Name: "run-job",
+                Usage: "run an Aquifer job",
                 Subcommands: []*cli.Command{
                     {
-                        Name:  "schema-sync",
-                        Usage: "schema sync job",
-                        Action: func(cCtx *cli.Context) error {
-                            fmt.Println("new task template: ", cCtx.Args().First())
-                            return nil
+                        Name: "schema-sync",
+                        Usage: "Run a schema sync job",
+                        Flags: []cli.Flag{
+                            &cli.StringFlag{
+                                Name: "account-id",
+                                Usage: "Account ID for Job",
+                                Required: true,
+                            },
+                            &cli.StringFlag{
+                                Name: "entity-type",
+                                Usage: "Entity type for Job - integration, datastore, processor, or blobstore",
+                                Required: true,
+                            },
+                            &cli.StringFlag{
+                                Name: "entity-id",
+                                Usage: "Entity ID for Job",
+                                Required: true,
+                            },
+                            dryRunFlag,
+                        },
+                        Action: func(cCtx *cli.Context) (err error) {
+                            jobCtx, jobCancel := context.WithCancel(context.Background())
+
+                            jobType := "schema-sync"
+                            accountIdStr := cCtx.String("account-id")
+                            entityType := cCtx.String("entity-type")
+                            entityIdStr := cCtx.String("entity-id")
+
+                            var accountId uuid.UUID
+                            accountId, err = uuid.Parse(accountIdStr)
+                            if err != nil {
+                                return
+                            }
+
+                            var entityId uuid.UUID
+                            entityId, err = uuid.Parse(entityIdStr)
+                            if err != nil {
+                                return
+                            }
+
+                            jobCtx = log.With().
+                                Str("account_id", accountIdStr).
+                                Str("job_type", jobType).
+                                Str("entity_type", entityType).
+                                Str("entity_id", entityIdStr).
+                                Logger().
+                                WithContext(jobCtx)
+                            logger := log.Ctx(jobCtx)
+
+                            job := &AquiferJob{
+                                service: service,
+                                ctx: jobCtx,
+                                logger: logger,
+                                cancel: jobCancel,
+                                accountId: accountId,
+                                entityType: entityType,
+                                entityId: entityId,
+                                jobType: jobType,
+                            }
+
+                            return service.schemaSyncHandler(job)
                         },
                     },
                     {
-                        Name:  "extract",
-                        Usage: "extract job",
+                        Name: "extract",
+                        Usage: "Run an extract job",
+                        Flags: []cli.Flag{
+                            &cli.StringFlag{
+                                Name: "account-id",
+                                Usage: "Account ID for Job",
+                                Required: true,
+                            },
+                            &cli.StringFlag{
+                                Name: "entity-type",
+                                Usage: "Entity type for Job - integration, datastore, processor, or blobstore",
+                                Required: true,
+                            },
+                            &cli.StringFlag{
+                                Name: "entity-id",
+                                Usage: "Entity ID for Job",
+                                Required: true,
+                            },
+                            &cli.StringFlag{
+                                Name: "flow-id",
+                                Usage: "Flow ID for Job",
+                                Required: true,
+                            },
+                            dryRunFlag,
+                        },
                         Action: func(cCtx *cli.Context) error {
                             fmt.Println("new task template: ", cCtx.Args().First())
                             return nil
@@ -488,7 +587,7 @@ func (service *AquiferService) GetCli() *cli.App {
 func (service *AquiferService) RunCli() {
     app := service.GetCli()
     if err := app.Run(os.Args); err != nil {
-        log.Fatal().Err(err).Msg("Fatal error")
+        fmt.Println(err)
     }
 }
 

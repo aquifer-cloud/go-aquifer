@@ -61,6 +61,7 @@ type JobInterface interface {
 	Release(releaseStatus string, failureErrorId uuid.UUID) error
 	Touch() error
     GetExtracts() ([]*Extract, error)
+    UpsertSchema(string, map[string]interface{}) (map[string]interface{}, error)
 }
 
 type FileJobInterface interface {
@@ -134,6 +135,8 @@ func NewAquiferJobFromEvent(service *AquiferService, ctx context.Context, event 
 		job = NewFileJobFromEvent(service, ctx, event)
 	} else if event.Destination.JobType == "extract" {
 		job = NewExtractJobFromEvent(service, ctx, event)
+    } else if event.Destination.JobType == "schema-sync" {
+        job = NewSchemaSyncJobFromEvent(service, ctx, event)
 	} else {
 		err = fmt.Errorf("Unknown job type: %s", event.Destination.JobType)
 	}
@@ -212,6 +215,34 @@ func NewExtractJobFromEvent(service *AquiferService, ctx context.Context, event 
 	}
 }
 
+func NewSchemaSyncJobFromEvent(service *AquiferService, ctx context.Context, event AquiferEvent) JobInterface {
+    jobCtx, jobCancel := context.WithCancel(ctx)
+
+    jobCtx = log.With().
+        Str("account_id", event.AccountId.String()).
+        Str("job_type", event.Destination.JobType).
+        Str("job_id", event.Destination.JobId.String()).
+        Str("entity_type", event.Destination.Type).
+        Str("entity_id", event.Destination.Id.String()).
+        Logger().
+        WithContext(jobCtx)
+    logger := log.Ctx(jobCtx)
+
+    return &AquiferJob{
+        service: service,
+        ctx: jobCtx,
+        logger: logger,
+        cancel: jobCancel,
+        event: event,
+        accountId: event.AccountId,
+        entityType: event.Destination.Type,
+        entityId: event.Destination.Id,
+        jobType: event.Destination.JobType,
+        jobId: event.Destination.JobId,
+        ackImmediately: true,
+    }
+}
+
 func (job *AquiferJob) GetCtx() context.Context {
 	return job.ctx
 }
@@ -281,10 +312,6 @@ func (job *AquiferJob) GetTimeout() time.Duration {
 
 func (job *AquiferJob) GetConfig() Dict {
 	return job.entityAttributes.Get("config")
-}
-
-func (job *AquiferJob) GetSchemas() Dict {
-	return job.entityAttributes.Get("schemas")
 }
 
 func (job *AquiferJob) GetJobAttributes() Dict {
@@ -582,6 +609,43 @@ func (job *AquiferJob) GetExtracts() (extracts []*Extract, err error) {
             HashAlgo: stream.GetString("hash_algo"),
         }
     }
+    return
+}
+
+func (job *AquiferJob) UpsertSchema(relativePath string,
+                                    schema map[string]interface{}) (upsertedSchema map[string]interface{}, err error) {
+    var entityPath string
+    entityPath, err = job.service.GetEntityPath(
+        job.accountId,
+        job.entityType,
+        job.entityId)
+    if err != nil {
+        return
+    }
+
+    var token string
+    token, err = job.service.GetEntityToken(job.ctx, job.accountId, job.entityType, job.entityId)
+    if err != nil {
+        return
+    }
+
+    reqData := make(Dict).
+        Set("data", make(Dict).
+            SetString("type", "schema").
+            Set("attributes", schema))
+
+    var data Dict
+    data, err = job.service.Request(
+        job.GetCtx(),
+        "PUT",
+        fmt.Sprintf("%s/schemas/%s", entityPath, relativePath),
+        reqData,
+        token)
+    if err != nil {
+        return
+    }
+
+    upsertedSchema = data.Get("data").Get("attributes")
     return
 }
 

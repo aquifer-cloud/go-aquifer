@@ -311,3 +311,8 @@ func (job *MockJob) GetExtracts() (extracts []*Extract, err error) {
     err = fmt.Errorf("GetExtracts not implemented")
     return
 }
+
+func (job *MockJob) UpsertSchema(relativePath string,
+                                 schema map[string]interface{}) (upsertedSchema map[string]interface{}, err error) {
+    return
+}
