@@ -6,12 +6,23 @@ import (
     "bytes"
     "context"
     "net/http"
+    "encoding/json"
 
     "github.com/google/uuid"
     "github.com/rs/zerolog"
     "github.com/rs/zerolog/log"
     "github.com/jarcoal/httpmock"
 )
+
+func NewMockDb() map[string]map[string]interface{} {
+    return map[string]map[string]interface{}{
+        "datastores": map[string]interface{}{},
+        "data": map[string]interface{}{},
+        "files": map[string]interface{}{},
+        "jobs": map[string]interface{}{},
+        "extracts": map[string]interface{}{},
+    }
+}
 
 func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
     service := NewService("test-service")
@@ -64,6 +75,28 @@ func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
 
     httpmock.RegisterResponder(
         "GET",
+        "=~.*/accounts/([^/]+)/jobs/([^/]+)/extracts.*",
+        func(req *http.Request) (resp *http.Response, err error) {
+            var jobId string
+            jobId, err = httpmock.GetSubmatch(req, 2)
+            if err != nil {
+                return
+            }
+
+            var found bool
+            var extracts interface{}
+            extracts, found = mockDb["extracts"][jobId]
+            if !found {
+                return httpmock.NewJsonResponse(
+                    404,
+                    map[string]interface{}{})
+            }
+
+            return httpmock.NewJsonResponse(200, extracts)
+        })
+
+    httpmock.RegisterResponder(
+        "GET",
         "=~.*/accounts/([^/]+)/(data|jobs|files|datastores|blobstores|integrations|processors)/([^/]+)",
         func(req *http.Request) (resp *http.Response, err error) {
             var entityType string
@@ -99,6 +132,77 @@ func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
                         "attributes": entity,
                     },
                 })
+        })
+
+    httpmock.RegisterResponder(
+        "POST",
+        "=~.*/accounts/([^/]+)/(data|files)/upload",
+        func(req *http.Request) (*http.Response, error) {
+            fileId := uuid.New().String()
+
+            uploadUrl := "https://examples.com/files/" + fileId
+            httpmock.RegisterResponder(
+                "PUT",
+                uploadUrl,
+                func(req *http.Request) (*http.Response, error) {
+                    body := make([]byte, req.ContentLength)
+                    req.Body.Read(body)
+                    mockDb["files"][fileId] = body
+
+                    resp := httpmock.NewStringResponse(200, "OK")
+                    resp.Header.Add("Etag", "foo")
+                    return resp, nil
+                })
+
+            return httpmock.NewJsonResponse(
+                200,
+                map[string]interface{}{
+                    "data": map[string]interface{}{
+                        "id": fileId,
+                        "attributes": map[string]interface{}{
+                            "upload_token": "testtoken",
+                            "part_number": 1,
+                            "upload_url": uploadUrl,
+                        },
+                    },
+                })
+        })
+
+    httpmock.RegisterResponder(
+        "POST",
+        "=~.*/accounts/([^/]+)/(data|files)/upload/complete",
+        func(req *http.Request) (*http.Response, error) {
+            return httpmock.NewJsonResponse(
+                200,
+                map[string]interface{}{
+                    "data": map[string]interface{}{
+                        "attributes": map[string]interface{}{
+                        },
+                    },
+                })
+        })
+
+    httpmock.RegisterResponder(
+        "POST",
+        "=~.*/accounts/([^/]+)/(data|files)",
+        func(req *http.Request) (*http.Response, error) {
+            entityType, err := httpmock.GetSubmatch(req, 2)
+            if err != nil {
+                return nil, err
+            }
+
+            entityId := uuid.New().String()
+
+            body := make([]byte, req.ContentLength)
+            req.Body.Read(body)
+            var data map[string]interface{}
+            json.Unmarshal(body, data)
+            entity := data["data"].(map[string]interface{})["attributes"].(map[string]interface{})
+            entity["id"] = entityId
+
+            mockDb[entityType][entityId] = entity
+
+            return httpmock.NewJsonResponse(200, data)
         })
 
     // httpmock.RegisterNoResponder(
@@ -201,6 +305,7 @@ func (databatch *MockDataBatch) NextRecord() (record map[string]interface{}, exi
 
 type MockJob struct {
     service *AquiferService
+    event AquiferEvent
     accountId uuid.UUID
     jobType string
     jobId uuid.UUID
@@ -229,6 +334,10 @@ func (job *MockJob) GetCtx() context.Context {
 
 func (job *MockJob) GetService() *AquiferService {
     return nil
+}
+
+func (job *MockJob) GetEvent() AquiferEvent {
+    return job.event
 }
 
 func (job *MockJob) IsTimedout() bool {

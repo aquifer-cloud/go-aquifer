@@ -8,6 +8,7 @@ import (
 	"context"
 
     "github.com/google/uuid"
+    "golang.org/x/exp/slices"
     "github.com/rs/zerolog"
     "github.com/rs/zerolog/log"
 )
@@ -42,6 +43,7 @@ type AquiferEvent struct {
 type JobInterface interface {
 	Logger() *zerolog.Logger
 	GetCtx() context.Context
+    GetEvent() AquiferEvent
 	GetService() *AquiferService
 	IsTimedout() bool
 	GetAccountId() uuid.UUID
@@ -133,10 +135,9 @@ type AquiferJob struct {
 func NewAquiferJobFromEvent(service *AquiferService, ctx context.Context, event AquiferEvent) (job JobInterface, err error) {
 	if event.Destination.JobType == "file" || event.Destination.JobType == "data-batch" {
 		job = NewFileJobFromEvent(service, ctx, event)
-	} else if event.Destination.JobType == "extract" {
-		job = NewExtractJobFromEvent(service, ctx, event)
-    } else if event.Destination.JobType == "schema-sync" {
-        job = NewSchemaSyncJobFromEvent(service, ctx, event)
+    } else if slices.Contains([]string{"extract", "schema-sync", "connection-test"},
+                              event.Destination.JobType) {
+        job = NewJobFromEvent(service, ctx, event)
 	} else {
 		err = fmt.Errorf("Unknown job type: %s", event.Destination.JobType)
 	}
@@ -185,47 +186,21 @@ func NewFileJobFromEvent(service *AquiferService, ctx context.Context, event Aqu
 	return &job
 }
 
-func NewExtractJobFromEvent(service *AquiferService, ctx context.Context, event AquiferEvent) JobInterface {
-	jobCtx, jobCancel := context.WithCancel(ctx)
-
-	jobCtx = log.With().
-		Str("account_id", event.AccountId.String()).
-		Str("job_type", event.Destination.JobType).
-		Str("job_id", event.Destination.JobId.String()).
-		Str("flow_id", event.Destination.FlowId.String()).
-		Str("entity_type", event.Destination.Type).
-		Str("entity_id", event.Destination.Id.String()).
-		Logger().
-		WithContext(jobCtx)
-	logger := log.Ctx(jobCtx)
-
-	return &AquiferJob{
-		service: service,
-		ctx: jobCtx,
-		logger: logger,
-		cancel: jobCancel,
-		event: event,
-		accountId: event.AccountId,
-		entityType: event.Destination.Type,
-		entityId: event.Destination.Id,
-		flowId: event.Destination.FlowId,
-		jobType: event.Destination.JobType,
-		jobId: event.Destination.JobId,
-		ackImmediately: true,
-	}
-}
-
-func NewSchemaSyncJobFromEvent(service *AquiferService, ctx context.Context, event AquiferEvent) JobInterface {
+func NewJobFromEvent(service *AquiferService, ctx context.Context, event AquiferEvent) JobInterface {
     jobCtx, jobCancel := context.WithCancel(ctx)
 
-    jobCtx = log.With().
+    loggerParams := log.With().
         Str("account_id", event.AccountId.String()).
         Str("job_type", event.Destination.JobType).
         Str("job_id", event.Destination.JobId.String()).
         Str("entity_type", event.Destination.Type).
-        Str("entity_id", event.Destination.Id.String()).
-        Logger().
-        WithContext(jobCtx)
+        Str("entity_id", event.Destination.Id.String())
+
+    if event.Destination.FlowId != uuid.Nil {
+        loggerParams = loggerParams.Str("flow_id", event.Destination.FlowId.String())
+    }
+
+    jobCtx = loggerParams.Logger().WithContext(jobCtx)
     logger := log.Ctx(jobCtx)
 
     return &AquiferJob{
@@ -253,6 +228,10 @@ func (job *AquiferJob) GetService() *AquiferService {
 
 func (job *AquiferJob) Logger() *zerolog.Logger {
 	return job.logger
+}
+
+func (job *AquiferJob) GetEvent() AquiferEvent {
+    return job.event
 }
 
 func (job *AquiferJob) GetType() string {
@@ -581,7 +560,7 @@ func (job *AquiferJob) GetExtracts() (extracts []*Extract, err error) {
     rawExtracts := data.GetArray("data")
     extracts = make([]*Extract, len(rawExtracts))
     for i, rawExtract := range rawExtracts {
-        rawExtractDict := rawExtract.(Dict)
+        rawExtractDict := Dict(rawExtract.(map[string]interface{}))
         rawExtractAttributes := rawExtractDict.Get("attributes")
         offsetInterval, _ := rawExtractAttributes.GetFloat64("offset_interval")
 
@@ -590,23 +569,25 @@ func (job *AquiferJob) GetExtracts() (extracts []*Extract, err error) {
             Get("stream").
             Get("data").
             GetString("id")
-        stream := includes["stream"][streamId].(Dict)
+        stream := Dict(includes["stream"][streamId].(map[string]interface{}))
+        streamAttributes := stream.Get("attributes")
         schemaId := stream.
             Get("relationships").
             Get("schema").
             Get("data").
             GetString("id")
-        schema := includes["schema"][schemaId].(Dict)
+        schema := Dict(includes["schema"][schemaId].(map[string]interface{}))
+        schemaAttributes := schema.Get("attributes")
 
         extracts[i] = &Extract{
-            Path: schema.GetString("path"),
-            RelativePath: schema.GetString("relative_path"),
+            Path: schemaAttributes.GetString("path"),
+            RelativePath: schemaAttributes.GetString("relative_path"),
             ExtractType: rawExtractAttributes.GetString("extract_type"),
             OffsetField: rawExtractAttributes.GetString("offset_field"),
             OffsetInterval: offsetInterval,
             TargetJsonSchema: rawExtractAttributes.Get("target_json_schema"),
-            HashSalt: stream.GetString("hash_salt"),
-            HashAlgo: stream.GetString("hash_algo"),
+            HashSalt: streamAttributes.GetString("hash_salt"),
+            HashAlgo: streamAttributes.GetString("hash_algo"),
         }
     }
     return
