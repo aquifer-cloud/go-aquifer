@@ -136,9 +136,21 @@ func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
 
     httpmock.RegisterResponder(
         "POST",
-        "=~.*/accounts/([^/]+)/(data|files)/upload",
+        "=~.*/accounts/([^/]+)/(data|files)/upload$",
         func(req *http.Request) (*http.Response, error) {
-            fileId := uuid.New().String()
+            body := make([]byte, req.ContentLength)
+            req.Body.Read(body)
+            var data map[string]interface{}
+            json.Unmarshal(body, &data)
+
+            attributes := data["data"].(map[string]interface{})["attributes"].(map[string]interface{})
+            uploadToken := attributes["upload_token"]
+            var fileId string
+            if uploadToken != nil {
+                fileId = uploadToken.(string)
+            } else {
+                fileId = uuid.New().String()
+            }
 
             uploadUrl := "https://examples.com/files/" + fileId
             httpmock.RegisterResponder(
@@ -160,7 +172,7 @@ func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
                     "data": map[string]interface{}{
                         "id": fileId,
                         "attributes": map[string]interface{}{
-                            "upload_token": "testtoken",
+                            "upload_token": fileId,
                             "part_number": 1,
                             "upload_url": uploadUrl,
                         },
@@ -172,12 +184,21 @@ func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
         "POST",
         "=~.*/accounts/([^/]+)/(data|files)/upload/complete",
         func(req *http.Request) (*http.Response, error) {
+            body := make([]byte, req.ContentLength)
+            req.Body.Read(body)
+            var data map[string]interface{}
+            json.Unmarshal(body, &data)
+
+            entity := data["data"].(map[string]interface{})["attributes"].(map[string]interface{})
+            entity["id"] = entity["upload_token"]
+
+            mockDb["data"][entity["upload_token"].(string)] = entity
+
             return httpmock.NewJsonResponse(
                 200,
                 map[string]interface{}{
                     "data": map[string]interface{}{
-                        "attributes": map[string]interface{}{
-                        },
+                        "attributes": entity,
                     },
                 })
         })
@@ -196,7 +217,7 @@ func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
             body := make([]byte, req.ContentLength)
             req.Body.Read(body)
             var data map[string]interface{}
-            json.Unmarshal(body, data)
+            json.Unmarshal(body, &data)
             entity := data["data"].(map[string]interface{})["attributes"].(map[string]interface{})
             entity["id"] = entityId
 
