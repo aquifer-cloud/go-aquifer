@@ -113,8 +113,17 @@ func transformValue(path []string,
         case string:
             jsonType = []string{jsonTypeRaw.(string)}
             break
-        case []string:
-            jsonType = jsonTypeRaw.([]string)
+        case []interface{}:
+            jsonTypeArray := jsonTypeRaw.([]interface{})
+            jsonType = make([]string, len(jsonTypeArray))
+            for i, typeItem := range jsonTypeArray {
+                typeStr, assertionOk := typeItem.(string)
+                if !assertionOk {
+                    err = jsonSchemaError(path, "\"type\" must be a string or array of strings")
+                    return
+                }
+                jsonType[i] = typeStr
+            }
         default:
             err = jsonSchemaError(path, "\"type\" must be a string or array of strings")
             return
@@ -191,11 +200,16 @@ func transformScalar(path []string,
 
     switch jsonType {
     case "string":
-        out, err = valueToString(value)
+        out, err = ValueToString(value)
         return
     case "integer":
         if num, ok := value.(int); ok {
             out = num
+            return
+        }
+
+        if num, ok := value.(int64); ok {
+            out = int(num)
             return
         }
 
@@ -209,7 +223,7 @@ func transformScalar(path []string,
             return
         }
 
-        err = fmt.Errorf("Cannot convert value to integer: %v", value)
+        err = fmt.Errorf("Cannot convert value to integer: %T %v", value, value)
         return
     case "number":
         if num, ok := value.(float64); ok {
@@ -227,7 +241,7 @@ func transformScalar(path []string,
             return
         }
 
-        err = fmt.Errorf("Cannot convert value to float: %v", value)
+        err = fmt.Errorf("Cannot convert value to float: %T %v", value, value)
         return
     case "boolean":
         if b, ok := value.(bool); ok {
@@ -241,13 +255,13 @@ func transformScalar(path []string,
             return
         }
 
-        err = fmt.Errorf("Cannot convert value to boolean: %v", value)
+        err = fmt.Errorf("Cannot convert value to boolean: %T %v", value, value)
         return
     }
     return
 }
 
-func valueToString(value interface{}) (interface{}, error) {
+func ValueToString(value interface{}) (interface{}, error) {
     switch value.(type) {
     case string:
         str := value.(string)
