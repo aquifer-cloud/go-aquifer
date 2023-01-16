@@ -18,6 +18,7 @@ func NewMockDb() map[string]map[string]interface{} {
     return map[string]map[string]interface{}{
         "datastores": map[string]interface{}{},
         "data": map[string]interface{}{},
+        "snapshots": map[string]interface{}{},
         "files": map[string]interface{}{},
         "jobs": map[string]interface{}{},
         "extracts": map[string]interface{}{},
@@ -47,7 +48,6 @@ func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
         "POST",
         "=~.*/accounts/([^/]+)/([^/]+)/([^/]+)/lock",
         func(req *http.Request) (*http.Response, error) {
-            // httpmock.MustGetSubmatch(req, )
             return httpmock.NewJsonResponse(
                 200,
                 map[string]interface{}{
@@ -97,7 +97,7 @@ func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
 
     httpmock.RegisterResponder(
         "GET",
-        "=~.*/accounts/([^/]+)/(data|jobs|files|datastores|blobstores|integrations|processors)/([^/]+)",
+        "=~.*/accounts/([^/]+)/(data|snapshots|jobs|files|datastores|blobstores|integrations|processors)/([^/]+)",
         func(req *http.Request) (resp *http.Response, err error) {
             var entityType string
             entityType, err = httpmock.GetSubmatch(req, 2)
@@ -417,6 +417,10 @@ func (job *MockJob) GetJobAttributes() Dict {
     return Dict{}
 }
 
+func (job *MockJob) GetRelativePath() string {
+    return ""
+}
+
 func (job *MockJob) GetSnapshotVersion() int {
     return 0
 }
@@ -435,6 +439,10 @@ func (job *MockJob) GetDataBatch() DataBatchInterface {
 
 func (job *MockJob) GetDataOutputStream() *DataOutputStream {
     return nil
+}
+
+func (job *MockJob) GetFlow() (flow *Flow, err error) {
+    return
 }
 
 func (job *MockJob) GetExtracts() (extracts []*Extract, err error) {

@@ -224,6 +224,7 @@ func (service *AquiferService) RunJob(ctx context.Context, doneChan chan<- bool,
 		if r != nil && err == nil {
 			err = r.(error)
 			log.Error().
+                Stack().
 				Err(err).
 				Str("account_id", event.AccountId.String()).
 				Str("job_type", event.Destination.JobType).
@@ -297,6 +298,8 @@ func (service *AquiferService) RunJob(ctx context.Context, doneChan chan<- bool,
 
 		if jobType == "extract" {
 			err = service.extractHandler(job)
+        } else if jobType == "schema-sync" {
+            err = service.schemaSyncHandler(job)
 		} else if jobType == "data-batch" {
 			err = service.dataHandler(job)
 		} else if jobType == "file" {

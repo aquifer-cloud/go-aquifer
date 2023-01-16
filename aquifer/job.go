@@ -54,6 +54,7 @@ type JobInterface interface {
 	GetEntityType() string
 	GetEntityId() uuid.UUID
 	GetConfig() Dict
+    GetRelativePath() string
     GetSnapshotVersion() int
     GetHyperbatchId() uuid.UUID
     GetJobAttributes() Dict
@@ -62,6 +63,7 @@ type JobInterface interface {
 	Lock() error
 	Release(releaseStatus string, failureErrorId uuid.UUID) error
 	Touch() error
+    GetFlow() (*Flow, error)
     GetExtracts() ([]*Extract, error)
     UpsertSchema(string, map[string]interface{}) (map[string]interface{}, error)
 }
@@ -135,7 +137,7 @@ type AquiferJob struct {
 func NewAquiferJobFromEvent(service *AquiferService, ctx context.Context, event AquiferEvent) (job JobInterface, err error) {
 	if event.Destination.JobType == "file" || event.Destination.JobType == "data-batch" {
 		job = NewFileJobFromEvent(service, ctx, event)
-    } else if slices.Contains([]string{"extract", "schema-sync", "connection-test"},
+    } else if slices.Contains([]string{"extract", "schema-sync", "snapshot", "connection-test"},
                               event.Destination.JobType) {
         job = NewJobFromEvent(service, ctx, event)
 	} else {
@@ -262,17 +264,17 @@ func (job *AquiferJob) GetAccountId() uuid.UUID {
 	return job.accountId
 }
 
-func (fileJob *FileJob) GetRelativePath() string {
-    return fileJob.jobAttributes.GetString("relative_path")
+func (job *AquiferJob) GetRelativePath() string {
+    return job.jobAttributes.GetString("relative_path")
 }
 
 func (job *AquiferJob) GetSnapshotVersion() int {
-    snapshotVersion, _ := job.entityAttributes.GetInt("snapshot_version")
+    snapshotVersion, _ := job.jobAttributes.GetInt("snapshot_version")
     return snapshotVersion
 }
 
 func (job *AquiferJob) GetHyperbatchId() uuid.UUID {
-    hyperbatchIdStr := job.entityAttributes.GetString("hyperbatch_id")
+    hyperbatchIdStr := job.jobAttributes.GetString("hyperbatch_id")
     hyperbatchId, _ := uuid.Parse(hyperbatchIdStr)
     return hyperbatchId
 }
@@ -377,7 +379,9 @@ func (job *AquiferJob) Lock() (err error) {
 	job.locked = true
 	job.lastTouch = time.Now()
 
-	if job.jobType != "extract" {
+	if job.jobType == "extract" || job.jobType == "schema-sync" {
+        job.jobAttributes = data.Get("data").Get("attributes")
+    } else {
 		var jobData Dict
 		jobData, err = job.service.Request(
 			job.ctx,
@@ -526,6 +530,38 @@ type Extract struct {
     TargetJsonSchema map[string]interface{}
     HashSalt string
     HashAlgo string
+}
+
+type Flow struct {
+    Id uuid.UUID
+    Name string
+}
+
+func (job *AquiferJob) GetFlow() (flow *Flow, err error) {
+    var token string
+    token, err = job.service.GetEntityToken(job.ctx, job.accountId, job.entityType, job.entityId)
+    if err != nil {
+        return
+    }
+
+    var data Dict
+    data, err = job.service.Request(
+        job.ctx,
+        "GET",
+        fmt.Sprintf("/accounts/%s/flows/%s",
+            job.accountId,
+            job.flowId),
+        nil,
+        token)
+    if err != nil {
+        return
+    }
+
+    flow = &Flow{
+        Id: job.flowId,
+        Name: data.Get("data").Get("attributes").GetString("name"),
+    }
+    return
 }
 
 func (job *AquiferJob) GetExtracts() (extracts []*Extract, err error) {
