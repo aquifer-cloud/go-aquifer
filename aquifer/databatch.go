@@ -249,7 +249,8 @@ func (databatch *DataBatch) NextRecord() (record map[string]interface{}, exists 
     }
 
     chunk := make([]byte, databatch.GetChunkSize())
-    _, err = databatch.Read(chunk)
+    var n int
+    n, err = databatch.Read(chunk)
     if err != nil && err != io.EOF {
         return
     }
@@ -259,7 +260,7 @@ func (databatch *DataBatch) NextRecord() (record map[string]interface{}, exists 
         return
     }
 
-    lines := bytes.Split(chunk, []byte("\n"))
+    lines := bytes.Split(chunk[:n], []byte("\n"))
     for i, line := range lines[:len(lines) - 1] {
         if i == 0 {
             line = append(databatch.readCurrentLine, line...)
