@@ -66,6 +66,7 @@ func ReadDataBatch(job JobInterface) (*DataBatch) {
                                     job.GetEntityId(),
                                     job.GetId()),
         logger: job.Logger(),
+        idempotentId: attributes.GetString("idempotent_id"),
         snapshotVersion: snapshotVersion,
         sequence: sequence,
         relativePath: attributes.GetString("relative_path"),
