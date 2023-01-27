@@ -69,7 +69,25 @@ func transformObject(path []string,
                     continue
                 }
             }
-            value, exists = obj[fieldName]
+            var keyHandler func(map[string]interface{}, interface{}) (interface{}, error)
+            keyHandler, exists = handlers["key"]
+            // TODO: memoize keys?
+            if exists {
+                var keyRaw interface{}
+                keyRaw, err = keyHandler(fieldSchema, fieldName)
+                if err != nil {
+                    return
+                }
+                var key string
+                key, assertionOk = keyRaw.(string)
+                if !assertionOk {
+                    err = fmt.Errorf("Transform key handler must return a string")
+                    return
+                }
+                value, exists = obj[key]
+            } else {
+                value, exists = obj[fieldName]
+            }
             if exists {
                 if value != nil {
                     value, err = transformValue(
