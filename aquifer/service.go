@@ -44,18 +44,71 @@ type AquiferService struct {
     schemaSyncHandler func(JobInterface) error
 }
 
-func NewService(deploymentName string) *AquiferService {
-	baseUrl := getenv("AQUIFER_BASE_URL", DEFAULT_BASE_URL)
-	deploymentToken := os.Getenv("AQUIFER_TOKEN")
-	workerId := getenv("AQUIFER_WORKER_ID",
-					   fmt.Sprintf("%s-0", deploymentName))
+type ServiceOptions struct {
+    DeploymentName *string
+    DeploymentToken *string
+    BaseUrl *string
+    WorkerId *string
+    ApiRetriesMax *int
+    ApiRetriesWaitTimeSec *int
+    ApiRetriesMaxWaitTimeSec *int
+}
 
-	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
+func NewService(options *ServiceOptions) *AquiferService {
+    zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
+
+    var baseUrl string
+    if options.BaseUrl == nil {
+        getenv("AQUIFER_BASE_URL", DEFAULT_BASE_URL)
+    } else {
+        baseUrl = *options.BaseUrl
+    }
+
+    var deploymentName string
+    if options.DeploymentName != nil {
+        deploymentName = *options.DeploymentName
+    }
+
+	var deploymentToken string
+    if options.DeploymentToken == nil {
+        deploymentToken = os.Getenv("AQUIFER_TOKEN")
+    } else {
+        deploymentToken = *options.DeploymentToken
+    }
+
+	var workerId string
+    if options.WorkerId == nil {
+        workerId = getenv("AQUIFER_WORKER_ID",
+					      fmt.Sprintf("%s-0", deploymentName))
+    } else {
+        workerId = *options.WorkerId
+    }
+
+    var apiRetriesMax int
+    if options.ApiRetriesMax == nil {
+        apiRetriesMax = 5
+    } else {
+        apiRetriesMax = *options.ApiRetriesMax
+    }
+
+    var apiRetriesWaitTime time.Duration
+    if options.ApiRetriesWaitTimeSec == nil {
+        apiRetriesWaitTime = 5
+    } else {
+        apiRetriesWaitTime = time.Duration(*options.ApiRetriesWaitTimeSec)
+    }
+
+    var apiRetriesMaxWaitTime time.Duration
+    if options.ApiRetriesMaxWaitTimeSec == nil {
+        apiRetriesMaxWaitTime = 30
+    } else {
+        apiRetriesMaxWaitTime = time.Duration(*options.ApiRetriesMaxWaitTimeSec)
+    }
 
     httpClient := resty.New().
-        SetRetryCount(5).
-        SetRetryWaitTime(5 * time.Second).
-        SetRetryMaxWaitTime(30 * time.Second).
+        SetRetryCount(apiRetriesMax).
+        SetRetryWaitTime(apiRetriesWaitTime * time.Second).
+        SetRetryMaxWaitTime(apiRetriesMaxWaitTime * time.Second).
         AddRetryCondition(
             func(r *resty.Response, err error) bool {
                 return err != nil || r.StatusCode() >= 500

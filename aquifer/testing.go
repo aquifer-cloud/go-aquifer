@@ -22,11 +22,19 @@ func NewMockDb() map[string]map[string]interface{} {
         "files": map[string]interface{}{},
         "jobs": map[string]interface{}{},
         "extracts": map[string]interface{}{},
+        "states": map[string]interface{}{},
     }
 }
 
 func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
-    service := NewService("test-service")
+    deploymentName := "test-service"
+    apiRetriesMax := 0
+    options := &ServiceOptions{
+        DeploymentName: &deploymentName,
+        ApiRetriesMax: &apiRetriesMax,
+    }
+    service := NewService(options)
+
     httpmock.ActivateNonDefault(service.httpClient.GetClient())
 
     httpmock.RegisterResponder(
@@ -222,6 +230,26 @@ func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
             entity["id"] = entityId
 
             mockDb[entityType][entityId] = entity
+
+            return httpmock.NewJsonResponse(200, data)
+        })
+
+    httpmock.RegisterResponder(
+        "POST",
+        "=~.*/accounts/([^/]+)/jobs/([^/]+)/state",
+        func(req *http.Request) (*http.Response, error) {
+            jobId, err := httpmock.GetSubmatch(req, 2)
+            if err != nil {
+                return nil, err
+            }
+
+            body := make([]byte, req.ContentLength)
+            req.Body.Read(body)
+            var data map[string]interface{}
+            json.Unmarshal(body, &data)
+            entity := data["data"].(map[string]interface{})["attributes"].(map[string]interface{})
+
+            mockDb["states"][jobId] = entity
 
             return httpmock.NewJsonResponse(200, data)
         })
