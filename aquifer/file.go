@@ -223,7 +223,7 @@ func (file *AquiferFile) Read(p []byte) (n int, err error) {
 		}
 
 		n, err = file.gzipReader.Read(p)
-		if err == io.EOF {
+		if n > 0 && err == io.EOF {
 			err = nil
 		}
 	} else {
