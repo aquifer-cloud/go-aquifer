@@ -115,46 +115,6 @@ func (service *AquiferService) StartService() {
     eventsChan := make(chan AquiferEvent, numWorkers)
     doneChan := make(chan bool, numWorkers)
 
-    // event, _ := parseEvent(
-    // 	make(Dict).
-    // 		SetString("id", "c06607e1-b899-4816-8d30-d3a716beffa4").
-    // 		SetString("type", "file").
-    // 		SetString("account_id", "4ec3ba1a-7267-49de-8fa4-ccedaf8804b1").
-    // 		SetString("timestamp", "2006-01-02T15:04:05.000000").
-    // 		Set("source", make(Dict).
-    // 			SetString("type", "router").
-    // 			SetString("flow_id", "e40e8bae-52c3-4c1c-8a9c-5e5ed59209dd").
-    // 			SetString("job_type", "file").
-    // 			SetString("job_id", "c06607e1-b899-4816-8d30-d3a716beffa4")).
-    // 		Set("destination", make(Dict).
-    // 			SetString("type", "processor").
-    // 			SetString("id", "7081616d-f82c-4ab1-9622-1c4c58bcab81").
-    // 			SetString("flow_id", "e40e8bae-52c3-4c1c-8a9c-5e5ed59209dd").
-    // 			SetString("job_type", "file").
-    // 			SetString("job_id", "c06607e1-b899-4816-8d30-d3a716beffa4")).
-    // 		Set("payload", make(Dict)))
-
-    // event, _ := parseEvent(
-    // 	make(Dict).
-    // 		SetString("id", "c06607e1-b899-4816-8d30-d3a716beffa4").
-    // 		SetString("type", "extract").
-    // 		SetString("account_id", "4ec3ba1a-7267-49de-8fa4-ccedaf8804b1").
-    // 		SetString("timestamp", "2006-01-02T15:04:05.000000").
-    // 		Set("source", make(Dict).
-    // 			SetString("type", "scheduler").
-    // 			SetString("flow_id", "d7b17483-b379-4244-ab78-2b279ca37d79")).
-    // 		Set("destination", make(Dict).
-    // 			SetString("type", "integration").
-    // 			SetString("id", "f61a89a0-a4b7-4f6f-988c-5963af568f0b").
-    // 			SetString("flow_id", "d7b17483-b379-4244-ab78-2b279ca37d79").
-    // 			SetString("job_type", "extract").
-    // 			SetString("job_id", "6bb9ff71-ccc1-46ed-a6ad-1b5d71435f8c")).
-    // 		Set("payload", make(Dict)))
-
-    // service.RunJob(ctx, doneChan, event)
-
-    // return
-
     log.Info().Msgf("Creating workers: %d", numWorkers)
 
     // TODO: what if a worker dies?

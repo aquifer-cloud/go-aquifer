@@ -265,6 +265,7 @@ func (databatch *DataBatch) NextRecord() (record map[string]interface{}, exists 
     for i, line := range lines[:len(lines) - 1] {
         if i == 0 {
             line = append(databatch.readCurrentLine, line...)
+            databatch.readCurrentLine = make([]byte, 0)
         }
         var lineRecord map[string]interface{}
         err = Unmarshal(line, &lineRecord)
@@ -273,7 +274,7 @@ func (databatch *DataBatch) NextRecord() (record map[string]interface{}, exists 
         }
         databatch.readRecords = append(databatch.readRecords, lineRecord)
     }
-    databatch.readCurrentLine = lines[len(lines) - 1]
+    databatch.readCurrentLine = append(databatch.readCurrentLine, lines[len(lines) - 1]...)
 
     return databatch.NextRecord()
 }
