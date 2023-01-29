@@ -59,7 +59,7 @@ func NewService(options *ServiceOptions) *AquiferService {
 
     var baseUrl string
     if options.BaseUrl == nil {
-        getenv("AQUIFER_BASE_URL", DEFAULT_BASE_URL)
+        baseUrl = getenv("AQUIFER_BASE_URL", DEFAULT_BASE_URL)
     } else {
         baseUrl = *options.BaseUrl
     }
