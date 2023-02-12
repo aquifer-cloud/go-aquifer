@@ -123,6 +123,7 @@ func NewService(options *ServiceOptions) *AquiferService {
 		deploymentToken: deploymentToken,
 		tokenCache: ttlcache.New[string, string](
 			ttlcache.WithTTL[string, string](time.Hour * 24 * 7), // 7 days
+            ttlcache.WithDisableTouchOnHit[string, string](),
 			ttlcache.WithCapacity[string, string](1000),
 		),
 	}
