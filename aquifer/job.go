@@ -14,30 +14,30 @@ import (
 )
 
 type EventSource struct {
-	Type string
-	Id uuid.UUID
-	FlowId uuid.UUID
-	JobType string
-	JobId uuid.UUID
+	Type string `json:"type"`
+	Id uuid.UUID `json:"id,omitempty"`
+	FlowId uuid.UUID `json:"flow_id,omitempty"`
+	JobType string `json:"job_type,omitempty"`
+	JobId uuid.UUID `json:"job_id,omitempty"`
 }
 
 type EventDestination struct {
-	Type string
-	Id uuid.UUID
-	FlowId uuid.UUID
-	JobType string
-	JobId uuid.UUID
-	Handle string
+	Type string `json:"type"`
+	Id uuid.UUID `json:"id"`
+	FlowId uuid.UUID `json:"flow_id,omitempty"`
+	JobType string `json:"job_type,omitempty"`
+	JobId uuid.UUID `json:"job_id,omitempty"`
+	Handle string `json:"handle,omitempty"`
 }
 
 type AquiferEvent struct {
-	Id uuid.UUID
-	Type string
-	AccountId uuid.UUID
-	Timestamp time.Time
-	Source EventSource
-	Destination EventDestination
-	Payload Dict
+	Id uuid.UUID `json:"id"`
+	Type string `json:"type"`
+	AccountId uuid.UUID `json:"account_id"`
+	Timestamp time.Time `json:"timestamp"`
+	Source EventSource `json:"source,omitempty"`
+	Destination EventDestination `json:"destination,omitempty"`
+	Payload Dict `json:"payload,omitempty"`
 }
 
 type JobInterface interface {
@@ -66,6 +66,8 @@ type JobInterface interface {
     GetFlow() (*Flow, error)
     GetExtracts() ([]*Extract, error)
     UpsertSchema(string, map[string]interface{}) (map[string]interface{}, error)
+    NewEvent(string, EventDestination, Dict) *AquiferEvent
+    SendResponse(context.Context, *AquiferEvent) error
 }
 
 type FileJobInterface interface {
@@ -137,7 +139,7 @@ type AquiferJob struct {
 func NewAquiferJobFromEvent(service *AquiferService, ctx context.Context, event AquiferEvent) (job JobInterface, err error) {
 	if event.Destination.JobType == "file" || event.Destination.JobType == "data-batch" {
 		job = NewFileJobFromEvent(service, ctx, event)
-    } else if slices.Contains([]string{"extract", "schema-sync", "snapshot", "connection-test"},
+    } else if slices.Contains([]string{"extract", "schema-sync", "snapshot", "connection-test", "query"},
                               event.Destination.JobType) {
         job = NewJobFromEvent(service, ctx, event)
 	} else {
@@ -664,6 +666,30 @@ func (job *AquiferJob) UpsertSchema(relativePath string,
 
     upsertedSchema = data.Get("data").Get("attributes")
     return
+}
+
+func (job *AquiferJob) NewEvent(eventType string,
+								destination EventDestination,
+								payload Dict) *AquiferEvent {
+	return &AquiferEvent{
+		Id: uuid.New(),
+		Type: eventType,
+		AccountId: job.GetAccountId(),
+		Timestamp: time.Now().UTC(),
+		Source: EventSource{
+			Type: job.GetEntityType(),
+			Id: job.GetEntityId(),
+			FlowId: job.GetFlowId(),
+			JobType: job.GetType(),
+			JobId: job.GetId(),
+		},
+		Destination: destination,
+		Payload: payload,
+	}
+}
+
+func (job *AquiferJob) SendResponse(ctx context.Context, event *AquiferEvent) (err error) {
+	return
 }
 
 func (job *AquiferJob) getLockPrefix() string {

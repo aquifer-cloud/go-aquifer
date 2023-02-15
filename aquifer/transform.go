@@ -142,6 +142,10 @@ func transformValue(path []string,
                 }
                 jsonType[i] = typeStr
             }
+        case []string:
+            tmpJsonType := jsonTypeRaw.([]string)
+            jsonType = make([]string, len(tmpJsonType))
+            copy(jsonType, tmpJsonType)
         default:
             err = jsonSchemaError(path, "\"type\" must be a string or array of strings")
             return

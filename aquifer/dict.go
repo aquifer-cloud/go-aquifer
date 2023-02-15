@@ -29,6 +29,24 @@ func (d Dict) GetArray(k string) []interface{} {
 	}
 }
 
+func (d Dict) GetStringArray(k string) []string {
+   v, exists := d[k]
+	if exists {
+		return v.([]string)
+	} else {
+		return make([]string, 0)
+	}
+}
+
+func (d Dict) GetMapArray(k string) []map[string]interface{} {
+   v, exists := d[k]
+	if exists {
+		return v.([]map[string]interface{})
+	} else {
+		return make([]map[string]interface{}, 0)
+	}
+}
+
 func (d Dict) SetArray(k string, v interface{}) Dict {
    d[k] = v
    return d

@@ -482,3 +482,13 @@ func (job *MockJob) UpsertSchema(relativePath string,
                                  schema map[string]interface{}) (upsertedSchema map[string]interface{}, err error) {
     return
 }
+
+func (job *MockJob) NewEvent(eventType string,
+                                destination EventDestination,
+                                payload Dict) *AquiferEvent {
+    return nil
+}
+
+func (job *MockJob) SendResponse(ctx context.Context, event *AquiferEvent) (err error) {
+    return
+}
