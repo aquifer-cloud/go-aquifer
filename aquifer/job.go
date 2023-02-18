@@ -216,6 +216,7 @@ func NewJobFromEvent(service *AquiferService, ctx context.Context, event Aquifer
         accountId: event.AccountId,
         entityType: event.Destination.Type,
         entityId: event.Destination.Id,
+        flowId: event.Destination.FlowId,
         jobType: event.Destination.JobType,
         jobId: event.Destination.JobId,
         ackImmediately: true,

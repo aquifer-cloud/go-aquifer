@@ -318,6 +318,8 @@ func (service *AquiferService) RunJob(ctx context.Context, doneChan chan<- bool,
 			err = service.dataHandler(job)
 		} else if jobType == "file" {
 			err = service.fileHandler(job)
+        } else if jobType == "snapshot" {
+            err = service.snapshotCompleteHandler(job)
 		} else {
 			err = fmt.Errorf("Job type not supported: %s", jobType)
 		}
