@@ -35,7 +35,7 @@ type DataOutputStream struct {
     source Dict
     job JobInterface
     entityType string
-    entityId uuid.UUID
+    entityId *uuid.UUID
     metricsSource string
     schemas map[string](map[string]interface{})
     schemasLock sync.Mutex
@@ -54,7 +54,7 @@ func NewDataOutputStream(service *AquiferService,
 						 source Dict,
 	                     job JobInterface,
 	                     entityType string,
-    					 entityId uuid.UUID,
+    					 entityId *uuid.UUID,
     	                 metricsSource string) (*DataOutputStream) {
 	outputstream := DataOutputStream{
 		service: service,

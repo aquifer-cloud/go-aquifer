@@ -23,8 +23,8 @@ type AquiferFile struct {
     httpClient http.Client
     accountId uuid.UUID
 	entityType string
-	entityId uuid.UUID
-    fileId uuid.UUID
+	entityId *uuid.UUID
+    fileId *uuid.UUID
     mode string
     compression string
     gzipEnabled bool
@@ -52,7 +52,7 @@ type AquiferFileInterface interface {
 	io.ReaderAt
 	io.Closer
 	Init() error
-	GetId() uuid.UUID
+	GetId() *uuid.UUID
 	GetChunkSize() int
 	GetSize() int
 }
@@ -64,8 +64,8 @@ func NewAquiferFile(service *AquiferService,
 					jobType string,
 					accountId uuid.UUID,
 					entityType string,
-					entityId uuid.UUID,
-					fileId uuid.UUID) *AquiferFile {
+					entityId *uuid.UUID,
+					fileId *uuid.UUID) *AquiferFile {
     file := AquiferFile{
     	service: service,
     	ctx: ctx,
@@ -84,7 +84,7 @@ func NewAquiferFile(service *AquiferService,
     return &file
 }
 
-func (file *AquiferFile) GetId() uuid.UUID {
+func (file *AquiferFile) GetId() *uuid.UUID {
 	return file.fileId
 }
 
@@ -383,10 +383,12 @@ func (file *AquiferFile) uploadInit() (err error) {
 	}
 
 	rawId := data.Get("data").GetString("id")
-	file.fileId, err = uuid.Parse(rawId)
+	var fileId uuid.UUID
+	fileId, err = uuid.Parse(rawId)
 	if err != nil {
 		return
 	}
+	file.fileId = &fileId
 
 	file.uploadToken = data.Get("data").Get("attributes").GetString("upload_token")
 	file.partNumber, _ = data.Get("data").Get("attributes").GetInt("part_number")

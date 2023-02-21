@@ -8,7 +8,7 @@ type Dict map[string]interface{}
 
 func (d Dict) Get(k string) Dict {
    v, exists := d[k]
-	if exists {
+	if exists && v != nil {
 		return v.(map[string]interface{})
 	} else {
 		return make(map[string]interface{})
@@ -22,7 +22,7 @@ func (d Dict) Set(k string, v map[string]interface{}) Dict {
 
 func (d Dict) GetArray(k string) []interface{} {
    v, exists := d[k]
-	if exists {
+	if exists && v != nil {
 		return v.([]interface{})
 	} else {
 		return make([]interface{}, 0)
@@ -31,7 +31,7 @@ func (d Dict) GetArray(k string) []interface{} {
 
 func (d Dict) GetStringArray(k string) []string {
    v, exists := d[k]
-	if exists {
+	if exists && v != nil {
 		return v.([]string)
 	} else {
 		return make([]string, 0)
@@ -40,7 +40,7 @@ func (d Dict) GetStringArray(k string) []string {
 
 func (d Dict) GetMapArray(k string) []map[string]interface{} {
    v, exists := d[k]
-	if exists {
+	if exists && v != nil {
 		return v.([]map[string]interface{})
 	} else {
 		return make([]map[string]interface{}, 0)
@@ -109,5 +109,10 @@ func (d Dict) SetFloat64(k string, v float64) Dict {
 }
 
 func (d Dict) Map() map[string]interface{} {
+	return d
+}
+
+func (d Dict) SetAny(k string, v any) Dict {
+	d[k] = v
 	return d
 }

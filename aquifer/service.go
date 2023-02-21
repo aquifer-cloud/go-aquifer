@@ -38,6 +38,7 @@ type AquiferService struct {
     connectionTestHandler func(JobInterface) error
 	fileHandler func(JobInterface) error
 	dataHandler func(JobInterface) error
+    queryHandler func(JobInterface) error
     snapshotCompleteHandler func(JobInterface) error
     hyperbatchCompleteHandler func(JobInterface) error
 	extractHandler func(JobInterface) error
@@ -224,7 +225,7 @@ func (service *AquiferService) StartService() {
 }
 
 func (service *AquiferService) RunJob(ctx context.Context, doneChan chan<- bool, event AquiferEvent) {
-	defer func() {
+    defer func() {
 		doneChan <- true
 	}()
 
@@ -251,7 +252,7 @@ func (service *AquiferService) RunJob(ctx context.Context, doneChan chan<- bool,
 
 		if job != nil {
 			releaseStatus := "release"
-			var failureErrorId uuid.UUID
+			var failureErrorId *uuid.UUID
 			if err != nil {
 				job.Logger().
 					Error().
@@ -316,6 +317,8 @@ func (service *AquiferService) RunJob(ctx context.Context, doneChan chan<- bool,
             err = service.schemaSyncHandler(job)
 		} else if jobType == "data-batch" {
 			err = service.dataHandler(job)
+        } else if jobType == "query" {
+            err = service.queryHandler(job)
 		} else if jobType == "file" {
 			err = service.fileHandler(job)
         } else if jobType == "snapshot" {
@@ -336,6 +339,10 @@ func (service *AquiferService) SetFileHandler(fn func(JobInterface) error) {
 
 func (service *AquiferService) SetDataHandler(fn func(JobInterface) error) {
 	service.dataHandler = fn
+}
+
+func (service *AquiferService) SetQueryHandler(fn func(JobInterface) error) {
+    service.queryHandler = fn
 }
 
 func (service *AquiferService) SetSnapshotCompleteHandler(fn func(JobInterface) error) {
@@ -379,8 +386,9 @@ func (service *AquiferService) Request(ctx context.Context,
 	resp, err = req.Execute(method, url)
 
 	if resp.StatusCode() > 299 {
-		err = fmt.Errorf("Non-200 status code: %d %s",
+		err = fmt.Errorf("Non-200 status code: %d %s %s",
 						 resp.StatusCode(),
+                         method,
 						 url)
 	}
 
@@ -390,7 +398,7 @@ func (service *AquiferService) Request(ctx context.Context,
 func (service *AquiferService) GetEntityToken(ctx context.Context,
 											  accountId uuid.UUID,
 											  entityType string,
-											  entityId uuid.UUID) (token string, err error) {
+											  entityId *uuid.UUID) (token string, err error) {
 	cacheKey := fmt.Sprintf("%s%s%s", accountId, entityType, entityId)
 	item := service.tokenCache.Get(cacheKey)
 	if item != nil {
@@ -424,7 +432,7 @@ func (service *AquiferService) GetEntityToken(ctx context.Context,
 
 func (service *AquiferService) GetEntityPath(accountId uuid.UUID,
 											 entityType string,
-											 entityId uuid.UUID) (entityPath string, err error) {
+											 entityId *uuid.UUID) (entityPath string, err error) {
 	var pathType string
 	pathType, err = getEntityPathType(entityType)
 	if err != nil {
@@ -558,7 +566,7 @@ func (service *AquiferService) GetCli() *cli.App {
                                 cancel: jobCancel,
                                 accountId: accountId,
                                 entityType: entityType,
-                                entityId: entityId,
+                                entityId: &entityId,
                                 jobType: jobType,
                             }
 
@@ -610,96 +618,46 @@ func (service *AquiferService) RunCli() {
     }
 }
 
+type JSONAPIEvents struct {
+    Events []AquiferEvent `json:"events"`
+}
+
+type JSONAPIData struct {
+    Id string `json:"id"`
+    Attributes JSONAPIEvents `json:"attributes"`
+}
+
+type JSONAPIResponse struct {
+    Data JSONAPIData `json:"data"`
+}
+
 func (service *AquiferService) getEvents(ctx context.Context, maxEvents int) (events []AquiferEvent, err error) {
 	// resty will do retries, idempotent_id makes sure we treat this as one message fetch
 	idempotentId := uuid.New().String()
 
-	var data Dict
-	data, err = service.Request(
-		ctx,
-		"GET",
-		fmt.Sprintf(
-			"/deployments/%s/events?max_messages=%d&idempotent_id=%s",
-			service.deploymentName,
-			maxEvents,
-			idempotentId),
-		nil,
-	    "")
-	if err != nil {
-		return
-	}
+	var data JSONAPIResponse
+    url := service.baseUrl + fmt.Sprintf(
+         "/deployments/%s/events?max_messages=%d&idempotent_id=%s",
+         service.deploymentName,
+         maxEvents,
+         idempotentId)
 
-	rawEvents := data.Get("data").Get("attributes").GetArray("events")
+    req := service.httpClient.R().
+        SetHeader("Accept", "application/json").
+        SetAuthToken(service.deploymentToken).
+        SetContext(ctx).
+        SetResult(&data)
 
-	for _, rawEvent := range rawEvents {
-		var event AquiferEvent
-		event, err = parseEvent(Dict(rawEvent.(map[string]interface{})))
-		if err != nil {
-			return
-		}
-		events = append(events, event)
-	}
-	return
-}
+    var resp *resty.Response
+    resp, err = req.Execute("GET", url)
 
-func parseEvent(rawEvent Dict) (event AquiferEvent, err error) {
-	var eventId uuid.UUID
-	eventId, err = uuid.Parse(rawEvent.GetString("id"))
-	if err != nil {
-		return
-	}
+    if resp.StatusCode() > 299 {
+        err = fmt.Errorf("Non-200 status code: %d %s",
+                         resp.StatusCode(),
+                         url)
+    }
 
-	var accountId uuid.UUID
-	accountId, err = uuid.Parse(rawEvent.GetString("account_id"))
-	if err != nil {
-		return
-	}
-
-	var timestamp time.Time
-	layout := "2006-01-02T15:04:05.000000"
-	timestamp, err = time.Parse(layout, rawEvent.GetString("timestamp"))
-	if err != nil {
-		return
-	}
-
-	source := rawEvent.Get("source")
-	var sourceId uuid.UUID
-	sourceId, err = uuid.Parse(source.GetString("id"))
-	var sourceFlowId uuid.UUID
-	sourceFlowId, err = uuid.Parse(source.GetString("flow_id"))
-	var sourceJobId uuid.UUID
-	sourceJobId, err = uuid.Parse(source.GetString("job_id"))
-
-	destination := rawEvent.Get("destination")
-	var destinationId uuid.UUID
-	destinationId, err = uuid.Parse(destination.GetString("id"))
-	var destinationFlowId uuid.UUID
-	destinationFlowId, err = uuid.Parse(destination.GetString("flow_id"))
-	var destinationJobId uuid.UUID
-	destinationJobId, err = uuid.Parse(destination.GetString("job_id"))
-
-	event = AquiferEvent{
-		Id: eventId,
-		Type: rawEvent.GetString("type"),
-		AccountId: accountId,
-		Timestamp: timestamp,
-		Source: EventSource{
-			Type: source.GetString("type"),
-			Id: sourceId,
-			FlowId: sourceFlowId,
-			JobType: source.GetString("job_type"),
-			JobId: sourceJobId,
-		},
-		Destination: EventDestination{
-			Type: destination.GetString("type"),
-			Id: destinationId,
-			FlowId: destinationFlowId,
-			JobType: destination.GetString("job_type"),
-			JobId: destinationJobId,
-			Handle: destination.GetString("handle"),
-		},
-		Payload: rawEvent.Get("payload"),
-	}
+    events = data.Data.Attributes.Events
 	return
 }
 

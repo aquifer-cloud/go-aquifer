@@ -11,30 +11,48 @@ import (
     "golang.org/x/exp/slices"
     "github.com/rs/zerolog"
     "github.com/rs/zerolog/log"
+    "github.com/relvacode/iso8601"
 )
 
 type EventSource struct {
 	Type string `json:"type"`
-	Id uuid.UUID `json:"id,omitempty"`
-	FlowId uuid.UUID `json:"flow_id,omitempty"`
+	Id *uuid.UUID `json:"id,omitempty"`
+	FlowId *uuid.UUID `json:"flow_id,omitempty"`
 	JobType string `json:"job_type,omitempty"`
-	JobId uuid.UUID `json:"job_id,omitempty"`
+	JobId *uuid.UUID `json:"job_id,omitempty"`
+	ResponseHandle string `json:"response_handle,omitempty"`
 }
 
 type EventDestination struct {
 	Type string `json:"type"`
-	Id uuid.UUID `json:"id"`
-	FlowId uuid.UUID `json:"flow_id,omitempty"`
+	Id *uuid.UUID `json:"id"`
+	FlowId *uuid.UUID `json:"flow_id,omitempty"`
 	JobType string `json:"job_type,omitempty"`
-	JobId uuid.UUID `json:"job_id,omitempty"`
+	JobId *uuid.UUID `json:"job_id,omitempty"`
 	Handle string `json:"handle,omitempty"`
+	ResponseHandle string `json:"response_handle,omitempty"`
+}
+
+type AquiferTime struct {
+	time.Time
+}
+
+func ToAquiferTime(input time.Time) AquiferTime {
+	return AquiferTime{
+		Time: input,
+	}
+}
+
+func (t *AquiferTime) UnmarshalJSON(b []byte) (err error) {
+	t.Time, err = iso8601.ParseString(string(b[1:len(b)-1]))
+	return
 }
 
 type AquiferEvent struct {
 	Id uuid.UUID `json:"id"`
 	Type string `json:"type"`
 	AccountId uuid.UUID `json:"account_id"`
-	Timestamp time.Time `json:"timestamp"`
+	Timestamp AquiferTime `json:"timestamp"`
 	Source EventSource `json:"source,omitempty"`
 	Destination EventDestination `json:"destination,omitempty"`
 	Payload Dict `json:"payload,omitempty"`
@@ -48,26 +66,26 @@ type JobInterface interface {
 	IsTimedout() bool
 	GetAccountId() uuid.UUID
 	GetType() string
-	GetId() uuid.UUID
-	GetFlowId() uuid.UUID
+	GetId() *uuid.UUID
+	GetFlowId() *uuid.UUID
 	GetEntityTypeName() string
 	GetEntityType() string
-	GetEntityId() uuid.UUID
+	GetEntityId() *uuid.UUID
 	GetConfig() Dict
     GetRelativePath() string
     GetSnapshotVersion() int
-    GetHyperbatchId() uuid.UUID
+    GetHyperbatchId() *uuid.UUID
     GetJobAttributes() Dict
     GetDataBatch() DataBatchInterface
     GetDataOutputStream() *DataOutputStream
 	Lock() error
-	Release(releaseStatus string, failureErrorId uuid.UUID) error
+	Release(releaseStatus string, failureErrorId *uuid.UUID) error
 	Touch() error
     GetFlow() (*Flow, error)
     GetExtracts() ([]*Extract, error)
     UpsertSchema(string, map[string]interface{}) (map[string]interface{}, error)
     NewEvent(string, EventDestination, Dict) *AquiferEvent
-    SendResponse(context.Context, *AquiferEvent) error
+    SendResponse(*AquiferEvent) error
 }
 
 type FileJobInterface interface {
@@ -122,15 +140,16 @@ type AquiferJob struct {
 	event AquiferEvent
 	accountId uuid.UUID
 	entityType string
-	entityId uuid.UUID
-	flowId uuid.UUID
+	entityId *uuid.UUID
+	flowId *uuid.UUID
 	jobType string
-	jobId uuid.UUID
+	jobId *uuid.UUID
     relativePath string
 	jobAttributes Dict
 	entityAttributes Dict
-	lockId uuid.UUID
+	lockId *uuid.UUID
 	locked bool
+	timeout_sec int
 	ackImmediately bool
 	lastTouch time.Time
 	touchLock sync.Mutex
@@ -139,8 +158,8 @@ type AquiferJob struct {
 func NewAquiferJobFromEvent(service *AquiferService, ctx context.Context, event AquiferEvent) (job JobInterface, err error) {
 	if event.Destination.JobType == "file" || event.Destination.JobType == "data-batch" {
 		job = NewFileJobFromEvent(service, ctx, event)
-    } else if slices.Contains([]string{"extract", "schema-sync", "snapshot", "connection-test", "query"},
-                              event.Destination.JobType) {
+    } else if event.Type == "query" ||
+    	slices.Contains([]string{"extract", "schema-sync", "snapshot", "connection-test"}, event.Destination.JobType) {
         job = NewJobFromEvent(service, ctx, event)
 	} else {
 		err = fmt.Errorf("Unknown job type: %s", event.Destination.JobType)
@@ -195,12 +214,20 @@ func NewJobFromEvent(service *AquiferService, ctx context.Context, event Aquifer
 
     loggerParams := log.With().
         Str("account_id", event.AccountId.String()).
-        Str("job_type", event.Destination.JobType).
-        Str("job_id", event.Destination.JobId.String()).
         Str("entity_type", event.Destination.Type).
         Str("entity_id", event.Destination.Id.String())
 
-    if event.Destination.FlowId != uuid.Nil {
+    var jobType string
+    if event.Destination.JobType != "" {
+    	loggerParams = loggerParams.
+    		Str("job_type", event.Destination.JobType).
+        	Str("job_id", event.Destination.JobId.String())
+        jobType = event.Destination.JobType
+    } else {
+    	jobType = event.Type
+    }
+
+    if event.Destination.FlowId != nil {
         loggerParams = loggerParams.Str("flow_id", event.Destination.FlowId.String())
     }
 
@@ -217,7 +244,7 @@ func NewJobFromEvent(service *AquiferService, ctx context.Context, event Aquifer
         entityType: event.Destination.Type,
         entityId: event.Destination.Id,
         flowId: event.Destination.FlowId,
-        jobType: event.Destination.JobType,
+        jobType: jobType,
         jobId: event.Destination.JobId,
         ackImmediately: true,
     }
@@ -243,11 +270,11 @@ func (job *AquiferJob) GetType() string {
 	return job.jobType
 }
 
-func (job *AquiferJob) GetId() uuid.UUID {
+func (job *AquiferJob) GetId() *uuid.UUID {
 	return job.jobId
 }
 
-func (job *AquiferJob) GetFlowId() uuid.UUID {
+func (job *AquiferJob) GetFlowId() *uuid.UUID {
 	return job.flowId
 }
 
@@ -259,7 +286,7 @@ func (job *AquiferJob) GetEntityType() string {
 	return job.entityType
 }
 
-func (job *AquiferJob) GetEntityId() uuid.UUID {
+func (job *AquiferJob) GetEntityId() *uuid.UUID {
 	return job.entityId
 }
 
@@ -276,10 +303,10 @@ func (job *AquiferJob) GetSnapshotVersion() int {
     return snapshotVersion
 }
 
-func (job *AquiferJob) GetHyperbatchId() uuid.UUID {
+func (job *AquiferJob) GetHyperbatchId() *uuid.UUID {
     hyperbatchIdStr := job.jobAttributes.GetString("hyperbatch_id")
     hyperbatchId, _ := uuid.Parse(hyperbatchIdStr)
-    return hyperbatchId
+    return &hyperbatchId
 }
 
 func (job *AquiferJob) IsTimedout() bool {
@@ -287,11 +314,8 @@ func (job *AquiferJob) IsTimedout() bool {
 }
 
 func (job *AquiferJob) GetTimeout() time.Duration {
-	timeout, exists := job.jobAttributes.GetInt("timeout")
-	if !exists {
-		timeout = 900
-	}
-	return time.Duration(timeout) * time.Second
+	
+	return time.Duration(job.timeout_sec) * time.Second
 }
 
 func (job *AquiferJob) GetConfig() Dict {
@@ -352,52 +376,80 @@ func (job *AquiferJob) Lock() (err error) {
 		return
 	}
 
-	attributes := make(Dict).SetString("worker_id", job.service.workerId)
+	if job.jobId != nil {
+		attributes := make(Dict).SetString("worker_id", job.service.workerId)
 
-	if job.event.Destination.Handle != "" {
-		attributes = attributes.SetString("handle", job.event.Destination.Handle)
-	}
+		if job.event.Destination.Handle != "" {
+			attributes = attributes.SetString("handle", job.event.Destination.Handle)
+		}
 
-	reqData := make(Dict).
-		Set("data", make(Dict).
-			SetString("type", fmt.Sprintf("%s-lock", job.getLockPrefix())).
-			Set("attributes", attributes))
+		reqData := make(Dict).
+			Set("data", make(Dict).
+				SetString("type", fmt.Sprintf("%s-lock", job.getLockPrefix())).
+				Set("attributes", attributes))
 
-	var data Dict
-	data, err = job.service.Request(
-		job.ctx,
-		"POST",
-		fmt.Sprintf("%s/lock", job.getJobPath()),
-		reqData,
-		token)
-	if err != nil {
-		return
-	}
-
-	lockId := data.Get("data").Get("attributes").GetString("worker_lock_id")
-	job.lockId, err = uuid.Parse(lockId)
-	if err != nil {
-		return
-	}
-	job.locked = true
-	job.lastTouch = time.Now()
-
-	if job.jobType == "extract" || job.jobType == "schema-sync" {
-        job.jobAttributes = data.Get("data").Get("attributes")
-    } else {
-		var jobData Dict
-		jobData, err = job.service.Request(
+		var data Dict
+		data, err = job.service.Request(
 			job.ctx,
-			"GET",
-			job.getJobPath(),
-			nil,
+			"POST",
+			fmt.Sprintf("%s/lock", job.getJobPath()),
+			reqData,
 			token)
 		if err != nil {
 			return
 		}
 
-		job.jobAttributes = jobData.Get("data").Get("attributes")
+		rawLockId := data.Get("data").Get("attributes").GetString("worker_lock_id")
+		var lockId uuid.UUID
+		lockId, err = uuid.Parse(rawLockId)
+		if err != nil {
+			return
+		}
+		job.lockId = &lockId
+
+		if job.jobType == "extract" || job.jobType == "schema-sync" {
+	        job.jobAttributes = data.Get("data").Get("attributes")
+	    } else {
+			var jobData Dict
+			jobData, err = job.service.Request(
+				job.ctx,
+				"GET",
+				job.getJobPath(),
+				nil,
+				token)
+			if err != nil {
+				return
+			}
+
+			job.jobAttributes = jobData.Get("data").Get("attributes")
+		}
+
+		var exists bool
+		job.timeout_sec, exists = job.jobAttributes.GetInt("timeout")
+		if !exists {
+			job.timeout_sec = 900
+		}
+	} else {
+		reqData := make(Dict).
+			Set("data", make(Dict).
+				SetString("type", "deployment-event-touch").
+				Set("attributes", make(Dict).
+					SetString("handle", job.event.Destination.Handle)))
+
+		_, err = job.service.Request(
+			job.ctx,
+			"POST",
+			fmt.Sprintf("/deployments/%s/events/touch", job.service.deploymentName),
+			reqData,
+			"")
+		if err != nil {
+			return
+		}
+		job.timeout_sec = 60
 	}
+
+	job.locked = true
+	job.lastTouch = time.Now()
 
 	job.cancelTimer = time.AfterFunc(
 		job.GetTimeout(),
@@ -432,7 +484,7 @@ func (job *AquiferJob) Lock() (err error) {
 	return
 }
 
-func (job *AquiferJob) Release(releaseStatus string, failureErrorId uuid.UUID) (err error) {
+func (job *AquiferJob) Release(releaseStatus string, failureErrorId *uuid.UUID) (err error) {
 	defer func() {
 		if job.cancelTimer != nil {
 			job.cancelTimer.Stop() // TODO: needed?
@@ -441,46 +493,87 @@ func (job *AquiferJob) Release(releaseStatus string, failureErrorId uuid.UUID) (
 	}()
 
 	if job.locked {
-		ctx := job.ctx
-		if ctx.Err() != nil {
-			var cancel func()
-			ctx, cancel = context.WithCancel(context.TODO())
-			defer cancel()
-		}
+		if job.jobId != nil {
+			ctx := job.ctx
+			if ctx.Err() != nil {
+				var cancel func()
+				ctx, cancel = context.WithCancel(context.TODO())
+				defer cancel()
+			}
 
-		var token string
-		token, err = job.service.GetEntityToken(ctx, job.accountId, job.entityType, job.entityId)
-		if err != nil {
-			return
-		}
+			var token string
+			token, err = job.service.GetEntityToken(ctx, job.accountId, job.entityType, job.entityId)
+			if err != nil {
+				return
+			}
 
-		attributes := make(Dict)
+			attributes := make(Dict)
 
-		if releaseStatus != "" {
-			attributes = attributes.SetString("release_status", releaseStatus)
-		}
+			if releaseStatus != "" {
+				attributes = attributes.SetString("release_status", releaseStatus)
+			}
 
-		if failureErrorId != uuid.Nil {
-			attributes = attributes.SetString("failure_error_id", failureErrorId.String())
-		}
+			if failureErrorId != nil {
+				attributes = attributes.SetString("failure_error_id", failureErrorId.String())
+			}
 
-		if job.event.Destination.Handle != "" {
-			attributes = attributes.SetString("handle", job.event.Destination.Handle)
-		}
+			if job.event.Destination.Handle != "" {
+				attributes = attributes.SetString("handle", job.event.Destination.Handle)
+			}
 
-		reqData := make(Dict).
-			Set("data", make(Dict).
-				SetString("type", fmt.Sprintf("%s-release", job.getLockPrefix())).
-				Set("attributes", attributes))
+			reqData := make(Dict).
+				Set("data", make(Dict).
+					SetString("type", fmt.Sprintf("%s-release", job.getLockPrefix())).
+					Set("attributes", attributes))
 
-		_, err = job.service.Request(
-			ctx,
-			"POST",
-			fmt.Sprintf("%s/locks/%s/release", job.getJobPath(), job.lockId.String()),
-			reqData,
-			token)
-		if err != nil {
-			return
+			_, err = job.service.Request(
+				ctx,
+				"POST",
+				fmt.Sprintf("%s/locks/%s/release", job.getJobPath(), job.lockId.String()),
+				reqData,
+				token)
+			if err != nil {
+				return
+			}
+			job.locked = false
+		} else {
+			if releaseStatus == "failed" {
+				requestSource := job.GetEvent().Source
+			    eventDestination := EventDestination{
+			        Type: requestSource.Type,
+			        Id: requestSource.Id,
+			        ResponseHandle: requestSource.ResponseHandle,
+			    }
+
+			    payload := make(map[string]interface{})
+			    payload["http_status_code"] = 500
+			    payload["http_status_text"] = "Internal Error"
+
+			    event := job.NewEvent("error-response", eventDestination, payload)
+
+			    // we ignore SendResponse errors so the event message gets deleted,
+				// the response will eventually timeout
+				job.SendResponse(event)
+				if err != nil {
+					job.Logger().Error().Err(err).Msg("Error responding to request event")
+				}
+			}
+
+			reqData := make(Dict).
+				Set("data", make(Dict).
+					SetString("type", "deployment-event").
+					Set("attributes", make(Dict).
+						SetString("handle", job.event.Destination.Handle)))
+
+			_, err = job.service.Request(
+				job.ctx,
+				"DELETE",
+				fmt.Sprintf("/deployments/%s/events", job.service.deploymentName),
+				reqData,
+				"")
+			if err != nil {
+				return
+			}
 		}
 		job.locked = false
 	}
@@ -491,7 +584,7 @@ func (job *AquiferJob) Touch() (err error) {
 	job.touchLock.Lock()
 	defer job.touchLock.Unlock()
 
-	if job.locked && time.Now().Sub(job.lastTouch).Seconds() >= 60.0 {
+	if job.jobId != nil && job.locked && time.Now().Sub(job.lastTouch).Seconds() >= 60.0 {
 		var token string
 		token, err = job.service.GetEntityToken(job.ctx, job.accountId, job.entityType, job.entityId)
 		if err != nil {
@@ -518,9 +611,25 @@ func (job *AquiferJob) Touch() (err error) {
 		if err != nil {
 			return
 		}
-		job.lastTouch = time.Now()
-		job.cancelTimer.Reset(job.GetTimeout())
+	} else if job.jobId == nil && job.locked{
+		reqData := make(Dict).
+			Set("data", make(Dict).
+				SetString("type", "deployment-event-touch").
+				Set("attributes", make(Dict).
+					SetString("handle", job.event.Destination.Handle)))
+
+		_, err = job.service.Request(
+			job.ctx,
+			"POST",
+			fmt.Sprintf("/deployments/%s/events/touch", job.service.deploymentName),
+			reqData,
+			"")
+		if err != nil {
+			return
+		}
 	}
+	job.lastTouch = time.Now()
+	job.cancelTimer.Reset(job.GetTimeout())
 	return
 }
 
@@ -561,7 +670,7 @@ func (job *AquiferJob) GetFlow() (flow *Flow, err error) {
     }
 
     flow = &Flow{
-        Id: job.flowId,
+        Id: *job.flowId,
         Name: data.Get("data").Get("attributes").GetString("name"),
     }
     return
@@ -658,7 +767,7 @@ func (job *AquiferJob) UpsertSchema(relativePath string,
     data, err = job.service.Request(
         job.GetCtx(),
         "PUT",
-        fmt.Sprintf("%s/schemas/%s", entityPath, relativePath),
+        fmt.Sprintf("%s/schemas/relative-paths/%s", entityPath, relativePath),
         reqData,
         token)
     if err != nil {
@@ -676,7 +785,7 @@ func (job *AquiferJob) NewEvent(eventType string,
 		Id: uuid.New(),
 		Type: eventType,
 		AccountId: job.GetAccountId(),
-		Timestamp: time.Now().UTC(),
+		Timestamp: ToAquiferTime(time.Now().UTC()),
 		Source: EventSource{
 			Type: job.GetEntityType(),
 			Id: job.GetEntityId(),
@@ -689,7 +798,18 @@ func (job *AquiferJob) NewEvent(eventType string,
 	}
 }
 
-func (job *AquiferJob) SendResponse(ctx context.Context, event *AquiferEvent) (err error) {
+func (job *AquiferJob) SendResponse(event *AquiferEvent) (err error) {
+    reqData := make(Dict).
+        Set("data", make(Dict).
+            SetString("type", "event").
+            SetAny("attributes", event))
+
+    _, err = job.service.Request(
+        job.GetCtx(),
+        "POST",
+        fmt.Sprintf("/deployments/%s/events", job.service.deploymentName),
+        reqData,
+        job.service.deploymentToken)
 	return
 }
 

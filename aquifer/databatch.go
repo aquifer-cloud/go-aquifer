@@ -14,12 +14,12 @@ import (
 )
 
 type DataBatchInterface interface {
-    GetId() uuid.UUID
+    GetId() *uuid.UUID
     GetRelativePath() string
     GetSequence() int
     GetSnapshotVersion() int
     GetIdempotentId() string
-    GetHyperbatchId() uuid.UUID
+    GetHyperbatchId() *uuid.UUID
     GetJsonSchema() map[string]interface{}
     GetCount() int
     IsFull() bool
@@ -36,7 +36,7 @@ type DataBatch struct {
     snapshotVersion int
     sequence int
     idempotentId string
-    hyperbatchId uuid.UUID
+    hyperbatchId *uuid.UUID
     firstMessageSequence uint64
     relativePath string
     jsonSchema map[string]interface{}
@@ -82,11 +82,11 @@ func NewDataBatch(service *AquiferService,
                   source Dict,
                   accountId uuid.UUID,
                   entityType string,
-                  entityId uuid.UUID,
+                  entityId *uuid.UUID,
                   relativePath string,
                   jsonSchema map[string]interface{},
                   snapshotVersion int) (*DataBatch) {
-
+    id := uuid.New()
     dataBatch := &DataBatch{
         AquiferFile: NewAquiferFile(service,
                                     ctx,
@@ -96,7 +96,7 @@ func NewDataBatch(service *AquiferService,
                                     accountId,
                                     entityType,
                                     entityId,
-                                    uuid.New()),
+                                    &id),
         logger: logger,
         writeMode: true,
         snapshotVersion: snapshotVersion,
@@ -129,7 +129,7 @@ func NewDataBatch(service *AquiferService,
     return dataBatch
 }
 
-func (databatch *DataBatch) GetId() uuid.UUID {
+func (databatch *DataBatch) GetId() *uuid.UUID {
     return databatch.fileId
 }
 
@@ -149,7 +149,7 @@ func (databatch *DataBatch) GetIdempotentId() string {
     return databatch.idempotentId
 }
 
-func (databatch *DataBatch) GetHyperbatchId() uuid.UUID {
+func (databatch *DataBatch) GetHyperbatchId() *uuid.UUID {
     return databatch.hyperbatchId
 }
 
