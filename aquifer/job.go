@@ -305,6 +305,9 @@ func (job *AquiferJob) GetSnapshotVersion() int {
 
 func (job *AquiferJob) GetHyperbatchId() *uuid.UUID {
     hyperbatchIdStr := job.jobAttributes.GetString("hyperbatch_id")
+    if hyperbatchIdStr == "" {
+    	return nil
+    }
     hyperbatchId, _ := uuid.Parse(hyperbatchIdStr)
     return &hyperbatchId
 }

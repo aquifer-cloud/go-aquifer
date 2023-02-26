@@ -164,7 +164,6 @@ func (service *AquiferService) StartService() {
 	go service.tokenCache.Start()
 
 	numWorkers := runtime.NumCPU()
-	numWorkers = 1
 	var numRunning uint32 = 0
 
     eventsChan := make(chan AquiferEvent, numWorkers)

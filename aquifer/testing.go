@@ -266,7 +266,7 @@ type MockDataBatch struct {
     sequence int
     snapshotVersion int
     idempotentId string
-    hyperbatchId uuid.UUID
+    hyperbatchId *uuid.UUID
     stateSequence int
     relativePath string
     jsonSchema map[string]interface{}
@@ -279,7 +279,7 @@ func NewMockDataBatch(relativePath string,
                       jsonSchema map[string]interface{},
                       data []map[string]interface{},
                       snapshotVersion int,
-                      hyperbatchId uuid.UUID) *MockDataBatch {
+                      hyperbatchId *uuid.UUID) *MockDataBatch {
     id := uuid.New()
     mockDataBatch := MockDataBatch{
         id: id,
@@ -294,8 +294,8 @@ func NewMockDataBatch(relativePath string,
     return &mockDataBatch
 }
 
-func (databatch *MockDataBatch) GetId() uuid.UUID {
-    return databatch.id
+func (databatch *MockDataBatch) GetId() *uuid.UUID {
+    return &databatch.id
 }
 
 func (databatch *MockDataBatch) GetRelativePath() string {
@@ -314,7 +314,7 @@ func (databatch *MockDataBatch) GetIdempotentId() string {
     return databatch.idempotentId
 }
 
-func (databatch *MockDataBatch) GetHyperbatchId() uuid.UUID {
+func (databatch *MockDataBatch) GetHyperbatchId() *uuid.UUID {
     return databatch.hyperbatchId
 }
 
@@ -401,12 +401,12 @@ func (job *MockJob) GetType() string {
     return job.jobType
 }
 
-func (job *MockJob) GetId() uuid.UUID {
-    return job.jobId
+func (job *MockJob) GetId() *uuid.UUID {
+    return &job.jobId
 }
 
-func (job *MockJob) GetFlowId() uuid.UUID {
-    return job.flowId
+func (job *MockJob) GetFlowId() *uuid.UUID {
+    return &job.flowId
 }
 
 func (job *MockJob) GetEntityTypeName() string {
@@ -421,8 +421,8 @@ func (job *MockJob) SetEntityType(entityType string) {
     job.entityType = entityType
 }
 
-func (job *MockJob) GetEntityId() uuid.UUID {
-    return job.entityId
+func (job *MockJob) GetEntityId() *uuid.UUID {
+    return &job.entityId
 }
 
 func (job *MockJob) GetConfig() Dict {
@@ -433,7 +433,7 @@ func (job *MockJob) Lock() (err error) {
     return
 }
 
-func (job *MockJob) Release(releaseStatus string, failureErrorId uuid.UUID) (err error) {
+func (job *MockJob) Release(releaseStatus string, failureErrorId *uuid.UUID) (err error) {
     return
 }
 
@@ -453,8 +453,8 @@ func (job *MockJob) GetSnapshotVersion() int {
     return 0
 }
 
-func (job *MockJob) GetHyperbatchId() uuid.UUID {
-    return uuid.Nil
+func (job *MockJob) GetHyperbatchId() *uuid.UUID {
+    return nil
 }
 
 func (job *MockJob) SetDataBatch(databatch DataBatchInterface) {
@@ -489,6 +489,6 @@ func (job *MockJob) NewEvent(eventType string,
     return nil
 }
 
-func (job *MockJob) SendResponse(ctx context.Context, event *AquiferEvent) (err error) {
+func (job *MockJob) SendResponse(event *AquiferEvent) (err error) {
     return
 }
