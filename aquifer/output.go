@@ -36,6 +36,7 @@ type DataOutputStream struct {
     job JobInterface
     entityType string
     entityId *uuid.UUID
+    allowDiscovery bool
     metricsSource string
     schemas map[string](map[string]interface{})
     schemasLock sync.Mutex
@@ -55,7 +56,8 @@ func NewDataOutputStream(service *AquiferService,
 	                     job JobInterface,
 	                     entityType string,
     					 entityId *uuid.UUID,
-    	                 metricsSource string) (*DataOutputStream) {
+    	                 metricsSource string,
+                         allowDiscovery bool) (*DataOutputStream) {
 	outputstream := DataOutputStream{
 		service: service,
 		logger: log.Ctx(ctx),
@@ -64,6 +66,7 @@ func NewDataOutputStream(service *AquiferService,
 		job: job,
 		entityType: entityType,
 		entityId: entityId,
+        allowDiscovery: allowDiscovery,
 		metricsSource: metricsSource,
 		schemas: make(map[string](map[string]interface{})),
         states: orderedmap.NewOrderedMap[uint64, map[string]interface{}](),
@@ -96,10 +99,11 @@ func (outputstream *DataOutputStream) SetSchema(relativePath string, schema map[
 	outputstream.schemas[relativePath] = schema
 }
 
-func (outputstream *DataOutputStream) GetSchema(relativePath string) map[string]interface{} {
+func (outputstream *DataOutputStream) GetSchema(relativePath string) (map[string]interface{}, bool) {
 	outputstream.schemasLock.Lock()
 	defer outputstream.schemasLock.Unlock()
-	return outputstream.schemas[relativePath]
+	schema, schemaExists := outputstream.schemas[relativePath]
+    return schema, schemaExists
 }
 
 func (outputstream *DataOutputStream) FetchState() (err error) {
@@ -250,7 +254,7 @@ func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-c
 
             if message.Type == Record {
                 relativePath := message.RelativePath
-                if !outputstream.HasSchema(relativePath) {
+                if !outputstream.allowDiscovery && !outputstream.HasSchema(relativePath) {
                     err = fmt.Errorf("Error schema not found: %s", relativePath)
                     return
                 }
@@ -266,7 +270,7 @@ func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-c
 
     				outputstream.logger.Info().Msgf("New DataBatch: %s", relativePath)
 
-    				jsonSchema := outputstream.GetSchema(relativePath)
+    				jsonSchema, schemaExists := outputstream.GetSchema(relativePath)
     				dataBatch = NewDataBatch(outputstream.service,
     										 outputstream.logger,
     										 outputstream.ctx,
@@ -275,8 +279,10 @@ func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-c
     										 outputstream.entityType,
     										 outputstream.entityId,
     										 relativePath,
+                                             message.SnapshotVersion,
     										 jsonSchema,
-    										 message.SnapshotVersion)
+    										 schemaExists,
+                                             outputstream.allowDiscovery)
     				workerBatches[relativePath] = dataBatch
                     outputstream.currentBatches.Store(
                         fmt.Sprintf("%d%s", workerId, relativePath),
@@ -310,6 +316,7 @@ func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-c
                 }
             } else if message.Type == SchemaUpdate {
                 // TODO: flush existing batch
+                // TODO: update existing batch schemas?
                 outputstream.SetSchema(message.RelativePath, message.Data)
             } else if message.Type == SnapshotComplete {
                 err = outputstream.CompleteSnapshot(message.RelativePath, message.SnapshotVersion)

@@ -40,10 +40,12 @@ type DataBatch struct {
     firstMessageSequence uint64
     relativePath string
     jsonSchema map[string]interface{}
+    schemaExists bool
+    allowDiscovery bool
     maxCount int
     maxByteSize int
     recordsBuffer bytes.Buffer
-    readRecords []map[string]interface{}
+    records []map[string]interface{}
     readCurrentLine []byte
     count int
 }
@@ -84,8 +86,10 @@ func NewDataBatch(service *AquiferService,
                   entityType string,
                   entityId *uuid.UUID,
                   relativePath string,
+                  snapshotVersion int,
                   jsonSchema map[string]interface{},
-                  snapshotVersion int) (*DataBatch) {
+                  schemaExists bool,
+                  allowDiscovery bool) (*DataBatch) {
     id := uuid.New()
     dataBatch := &DataBatch{
         AquiferFile: NewAquiferFile(service,
@@ -100,6 +104,7 @@ func NewDataBatch(service *AquiferService,
         logger: logger,
         writeMode: true,
         snapshotVersion: snapshotVersion,
+        sequence: int(time.Now().UTC().Unix()),
         relativePath: relativePath,
         jsonSchema: jsonSchema,
         // TODO: make maxCount and maxByteSize settable
@@ -112,9 +117,9 @@ func NewDataBatch(service *AquiferService,
         attributes = make(Dict).
             Set("source", source).
             SetString("idempotent_id", file.fileId.String()).
-            SetInt("sequence", int(time.Now().Unix())).
+            SetInt("sequence", dataBatch.GetSequence()).
             SetString("relative_path", relativePath).
-            Set("json_schema", jsonSchema).
+            Set("json_schema", dataBatch.GetJsonSchema()).
             SetInt("count", dataBatch.GetCount())
 
         if snapshotVersion > 0 {
@@ -191,7 +196,12 @@ func (databatch *DataBatch) AddRecord(record map[string]interface{}, messageSequ
         return
     }
 
+    // TODO: threadsafe?
     databatch.count += 1
+    if !databatch.schemaExists {
+        databatch.records = append(databatch.records, record)
+    }
+
     // Need thread safety - The DataOutputStream check batch messageSequences
     atomic.CompareAndSwapUint64(&databatch.firstMessageSequence, 0, messageSequence)
 
@@ -205,6 +215,18 @@ func (databatch *DataBatch) Complete() (err error) {
     if !databatch.writeMode {
         err = fmt.Errorf("DataBatch not in write mode")
         return
+    }
+
+    if databatch.count == 0 {
+        return
+    }
+
+    if !databatch.schemaExists && databatch.allowDiscovery {
+        databatch.jsonSchema, err = DiscoverSchema(databatch.records)
+        if err != nil {
+            return
+        }
+        databatch.schemaExists = true
     }
 
     databatch.logger.
@@ -242,10 +264,10 @@ func (databatch *DataBatch) Cancel() error {
 }
 
 func (databatch *DataBatch) NextRecord() (record map[string]interface{}, exists bool, err error) {
-    if len(databatch.readRecords) > 0 {
+    if len(databatch.records) > 0 {
         exists = true
-        record = databatch.readRecords[0]
-        databatch.readRecords = databatch.readRecords[1:]
+        record = databatch.records[0]
+        databatch.records = databatch.records[1:]
         return
     }
 
@@ -272,7 +294,7 @@ func (databatch *DataBatch) NextRecord() (record map[string]interface{}, exists 
         if err != nil {
             return
         }
-        databatch.readRecords = append(databatch.readRecords, lineRecord)
+        databatch.records = append(databatch.records, lineRecord)
     }
     databatch.readCurrentLine = append(databatch.readCurrentLine, lines[len(lines) - 1]...)
 

@@ -77,7 +77,7 @@ type JobInterface interface {
     GetHyperbatchId() *uuid.UUID
     GetJobAttributes() Dict
     GetDataBatch() DataBatchInterface
-    GetDataOutputStream() *DataOutputStream
+    GetDataOutputStream(allowDiscovery bool) *DataOutputStream
 	Lock() error
 	Release(releaseStatus string, failureErrorId *uuid.UUID) error
 	Touch() error
@@ -340,7 +340,7 @@ func (job *AquiferJob) GetDataBatch() DataBatchInterface {
     return job.dataBatch
 }
 
-func (job *AquiferJob) GetDataOutputStream() *DataOutputStream {
+func (job *AquiferJob) GetDataOutputStream(allowDiscovery bool) *DataOutputStream {
     job.dataOutputStreamLock.Lock()
     defer job.dataOutputStreamLock.Unlock()
 
@@ -366,7 +366,8 @@ func (job *AquiferJob) GetDataOutputStream() *DataOutputStream {
             job,
             job.event.Destination.Type,
             job.event.Destination.Id,
-            metricsSource)
+            metricsSource,
+        	allowDiscovery)
     }
 
     return job.dataOutputStream
