@@ -220,65 +220,63 @@ func transformScalar(path []string,
         return
     }
 
-    switch jsonType {
-    case "string":
-        out, err = ValueToString(value)
-        return
-    case "integer":
-        if num, ok := value.(int); ok {
-            out = num
+    switch value.(type) {
+    case string:
+        valueStr := value.(string)
+        valueTrimmed := strings.TrimSpace(valueStr)
+        if valueTrimmed == "" {
             return
         }
-
-        if num, ok := value.(int64); ok {
-            out = int(num)
-            return
+        switch jsonType {
+        case "string":
+            out = valueStr
+        case "integer":
+            out, err = strconv.Atoi(valueStr)
+        case "number":
+            out, err = strconv.ParseFloat(valueStr, 64)
+        case "boolean":
+            out, err = strconv.ParseBool(valueStr)
+        default:
+            err = fmt.Errorf("Incompatible transformation types: %s %T", jsonType, value)
         }
-
-        if num, ok := value.(float64); ok {
-            out = int(num)
-            return
+    case int, int8, int32, int64:
+        switch jsonType {
+        case "string":
+            out, err = ValueToString(value)
+        case "integer", "number":
+            out = value
+        default:
+            err = fmt.Errorf("Incompatible transformation types: %s %T", jsonType, value)
         }
-
-        if str, ok := value.(string); ok {
-            out, err = strconv.Atoi(str)
-            return
+    case float32, float64:
+        switch jsonType {
+        case "string":
+            out, err = ValueToString(value)
+        case "integer":
+            switch value.(type) {
+            case float32:
+                out = int(value.(float32))
+            case float64:
+                out = int(value.(float64))
+            }
+        case "number":
+            out = value
+        default:
+            err = fmt.Errorf("Incompatible transformation types: %s %T", jsonType, value)
         }
-
-        err = fmt.Errorf("Cannot convert value to integer: %T %v", value, value)
-        return
-    case "number":
-        if num, ok := value.(float64); ok {
-            out = num
-            return
+    case bool:
+        switch jsonType {
+        case "string":
+            if value.(bool) == true {
+                out = "true"
+            } else {
+                out = "false"
+            }
+        case "boolean":
+            out = value
+        default:
+            err = fmt.Errorf("Incompatible transformation types: %s %T", jsonType, value)
         }
-
-        if num, ok := value.(int); ok {
-            out = float64(num)
-            return
-        }
-
-        if str, ok := value.(string); ok {
-            out, err = strconv.ParseFloat(str, 64)
-            return
-        }
-
-        err = fmt.Errorf("Cannot convert value to float: %T %v", value, value)
-        return
-    case "boolean":
-        if b, ok := value.(bool); ok {
-            out = b
-            return
-        }
-
-        // formating as string handles integers too, eg 1 and 0
-        out, err = strconv.ParseBool(fmt.Sprintf("%v", value))
-        if err != nil {
-            return
-        }
-
-        err = fmt.Errorf("Cannot convert value to boolean: %T %v", value, value)
-        return
     }
     return
 }

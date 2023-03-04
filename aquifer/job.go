@@ -77,7 +77,7 @@ type JobInterface interface {
     GetHyperbatchId() *uuid.UUID
     GetJobAttributes() Dict
     GetDataBatch() DataBatchInterface
-    GetDataOutputStream(allowDiscovery bool) *DataOutputStream
+    GetDataOutputStream(JobOutputStreamOptions) *DataOutputStream
 	Lock() error
 	Release(releaseStatus string, failureErrorId *uuid.UUID) error
 	Touch() error
@@ -150,9 +150,9 @@ type AquiferJob struct {
 	lockId *uuid.UUID
 	locked bool
 	timeout_sec int
-	ackImmediately bool
 	lastTouch time.Time
 	touchLock sync.Mutex
+	ackImmediately bool
 }
 
 func NewAquiferJobFromEvent(service *AquiferService, ctx context.Context, event AquiferEvent) (job JobInterface, err error) {
@@ -194,7 +194,6 @@ func NewFileJobFromEvent(service *AquiferService, ctx context.Context, event Aqu
 			flowId: event.Destination.FlowId,
 			jobType: event.Destination.JobType,
 			jobId: event.Destination.JobId,
-			ackImmediately: false,
 		},
 		File: NewAquiferFile(service,
 							 jobCtx,
@@ -231,6 +230,11 @@ func NewJobFromEvent(service *AquiferService, ctx context.Context, event Aquifer
         loggerParams = loggerParams.Str("flow_id", event.Destination.FlowId.String())
     }
 
+    ackImmediately := false
+    if slices.Contains([]string{"extract", "schema-sync", "connection-test"}, jobType) {
+    	ackImmediately = true
+    }
+
     jobCtx = loggerParams.Logger().WithContext(jobCtx)
     logger := log.Ctx(jobCtx)
 
@@ -246,8 +250,58 @@ func NewJobFromEvent(service *AquiferService, ctx context.Context, event Aquifer
         flowId: event.Destination.FlowId,
         jobType: jobType,
         jobId: event.Destination.JobId,
-        ackImmediately: true,
+        ackImmediately: ackImmediately,
     }
+}
+
+func NewJobFromCLI(service *AquiferService,
+				   ctx context.Context,
+				   jobType string,
+				   accountIdStr string,
+				   flowIdStr string,
+				   entityType string,
+				   entityIdStr string) (job JobInterface, err error) {
+	var accountId uuid.UUID
+	accountId, err = uuid.Parse(accountIdStr)
+	if err != nil {
+		return
+	}
+
+	var flowId uuid.UUID
+	flowId, err = uuid.Parse(flowIdStr)
+	if err != nil {
+		return
+	}
+
+	var entityId uuid.UUID
+	entityId, err = uuid.Parse(entityIdStr)
+	if err != nil {
+		return
+	}
+
+    loggerParams := log.With().
+        Str("account_id", accountIdStr).
+        Str("entity_type", entityType).
+        Str("entity_id", entityIdStr).
+        Str("flow_id", flowIdStr)
+
+    jobCtx, jobCancel := context.WithCancel(ctx)
+    jobCtx = loggerParams.Logger().WithContext(jobCtx)
+    logger := log.Ctx(jobCtx)
+
+    job = &AquiferJob{
+        service: service,
+        ctx: jobCtx,
+        logger: logger,
+        accountId: accountId,
+        entityType: entityType,
+        entityId: &entityId,
+        flowId: &flowId,
+        jobType: jobType,
+        cancel: jobCancel,
+        timeout_sec: 3600,
+    }
+    return
 }
 
 func (job *AquiferJob) GetCtx() context.Context {
@@ -340,17 +394,25 @@ func (job *AquiferJob) GetDataBatch() DataBatchInterface {
     return job.dataBatch
 }
 
-func (job *AquiferJob) GetDataOutputStream(allowDiscovery bool) *DataOutputStream {
+type JobOutputStreamOptions struct {
+	AllowDiscovery bool
+	EnableTransform bool
+}
+
+func (job *AquiferJob) GetDataOutputStream(options JobOutputStreamOptions) *DataOutputStream {
     job.dataOutputStreamLock.Lock()
     defer job.dataOutputStreamLock.Unlock()
 
     if job.dataOutputStream == nil {
         source := make(Dict).
-            SetString("type", job.event.Destination.Type).
-            SetString("id", job.event.Destination.Id.String()).
-            SetString("flow_id", job.event.Destination.FlowId.String()).
-            SetString("job_type", job.event.Destination.JobType).
-            SetString("job_id", job.event.Destination.JobId.String())
+            SetString("type", job.GetEntityType()).
+            SetString("id", job.GetEntityId().String()).
+            SetString("flow_id", job.GetFlowId().String()).
+            SetString("job_type", job.GetType())
+
+        if job.GetId() != nil {
+            source = source.SetString("job_id", job.GetId().String())
+        }
 
         metricsSource := "load"
         if job.jobType == "extract" {
@@ -364,10 +426,11 @@ func (job *AquiferJob) GetDataOutputStream(allowDiscovery bool) *DataOutputStrea
             job.GetCtx(),
             source,
             job,
-            job.event.Destination.Type,
-            job.event.Destination.Id,
+            job.GetEntityType(),
+            job.GetEntityId(),
             metricsSource,
-        	allowDiscovery)
+        	options.AllowDiscovery,
+        	options.EnableTransform)
     }
 
     return job.dataOutputStream
@@ -397,8 +460,10 @@ func (job *AquiferJob) Lock() (err error) {
 			job.ctx,
 			"POST",
 			fmt.Sprintf("%s/lock", job.getJobPath()),
-			reqData,
-			token)
+			RequestOptions{
+				Token: token,
+				Body: reqData,
+			})
 		if err != nil {
 			return
 		}
@@ -419,8 +484,9 @@ func (job *AquiferJob) Lock() (err error) {
 				job.ctx,
 				"GET",
 				job.getJobPath(),
-				nil,
-				token)
+				RequestOptions{
+					Token: token,
+				})
 			if err != nil {
 				return
 			}
@@ -433,7 +499,7 @@ func (job *AquiferJob) Lock() (err error) {
 		if !exists {
 			job.timeout_sec = 900
 		}
-	} else {
+	} else if job.event.Destination.Handle != "" {
 		reqData := make(Dict).
 			Set("data", make(Dict).
 				SetString("type", "deployment-event-touch").
@@ -444,8 +510,9 @@ func (job *AquiferJob) Lock() (err error) {
 			job.ctx,
 			"POST",
 			fmt.Sprintf("/deployments/%s/events/touch", job.service.deploymentName),
-			reqData,
-			"")
+			RequestOptions{
+				Body: reqData,
+			})
 		if err != nil {
 			return
 		}
@@ -477,8 +544,9 @@ func (job *AquiferJob) Lock() (err error) {
 		job.ctx,
 		"GET",
 		entityPath,
-		nil,
-		token)
+		RequestOptions{
+			Token: token,
+		})
 	if err != nil {
 		return
 	}
@@ -521,7 +589,7 @@ func (job *AquiferJob) Release(releaseStatus string, failureErrorId *uuid.UUID) 
 				attributes = attributes.SetString("failure_error_id", failureErrorId.String())
 			}
 
-			if job.event.Destination.Handle != "" {
+			if !job.ackImmediately && job.event.Destination.Handle != "" {
 				attributes = attributes.SetString("handle", job.event.Destination.Handle)
 			}
 
@@ -534,8 +602,10 @@ func (job *AquiferJob) Release(releaseStatus string, failureErrorId *uuid.UUID) 
 				ctx,
 				"POST",
 				fmt.Sprintf("%s/locks/%s/release", job.getJobPath(), job.lockId.String()),
-				reqData,
-				token)
+				RequestOptions{
+					Token: token,
+					Body: reqData,
+				})
 			if err != nil {
 				return
 			}
@@ -573,8 +643,9 @@ func (job *AquiferJob) Release(releaseStatus string, failureErrorId *uuid.UUID) 
 				job.ctx,
 				"DELETE",
 				fmt.Sprintf("/deployments/%s/events", job.service.deploymentName),
-				reqData,
-				"")
+				RequestOptions{
+					Body: reqData,
+				})
 			if err != nil {
 				return
 			}
@@ -588,6 +659,8 @@ func (job *AquiferJob) Touch() (err error) {
 	job.touchLock.Lock()
 	defer job.touchLock.Unlock()
 
+	touched := false
+
 	if job.jobId != nil && job.locked && time.Now().Sub(job.lastTouch).Seconds() >= 60.0 {
 		var token string
 		token, err = job.service.GetEntityToken(job.ctx, job.accountId, job.entityType, job.entityId)
@@ -597,7 +670,7 @@ func (job *AquiferJob) Touch() (err error) {
 
 		attributes := make(Dict)
 
-		if job.event.Destination.Handle != "" {
+		if !job.ackImmediately && job.event.Destination.Handle != "" {
 			attributes = attributes.SetString("handle", job.event.Destination.Handle)
 		}
 
@@ -610,12 +683,15 @@ func (job *AquiferJob) Touch() (err error) {
 			job.ctx,
 			"POST",
 			fmt.Sprintf("%s/locks/%s/touch", job.getJobPath(), job.lockId.String()),
-			reqData,
-			token)
+			RequestOptions{
+				Token: token,
+				Body: reqData,
+			})
 		if err != nil {
 			return
 		}
-	} else if job.jobId == nil && job.locked{
+		touched = true
+	} else if job.jobId == nil && job.locked {
 		reqData := make(Dict).
 			Set("data", make(Dict).
 				SetString("type", "deployment-event-touch").
@@ -626,14 +702,18 @@ func (job *AquiferJob) Touch() (err error) {
 			job.ctx,
 			"POST",
 			fmt.Sprintf("/deployments/%s/events/touch", job.service.deploymentName),
-			reqData,
-			"")
+			RequestOptions{
+				Body: reqData,
+			})
 		if err != nil {
 			return
 		}
+		touched = true
 	}
-	job.lastTouch = time.Now()
-	job.cancelTimer.Reset(job.GetTimeout())
+	if touched {
+		job.lastTouch = time.Now()
+		job.cancelTimer.Reset(job.GetTimeout())
+	}
 	return
 }
 
@@ -667,8 +747,9 @@ func (job *AquiferJob) GetFlow() (flow *Flow, err error) {
         fmt.Sprintf("/accounts/%s/flows/%s",
             job.accountId,
             job.flowId),
-        nil,
-        token)
+        RequestOptions{
+			Token: token,
+		})
     if err != nil {
         return
     }
@@ -692,8 +773,9 @@ func (job *AquiferJob) GetExtracts() (extracts []*Extract, err error) {
         job.ctx,
         "GET",
         fmt.Sprintf("%s/extracts?include=stream,schema", job.getJobPath()),
-        nil,
-        token)
+        RequestOptions{
+			Token: token,
+		})
     if err != nil {
         return
     }
@@ -772,8 +854,10 @@ func (job *AquiferJob) UpsertSchema(relativePath string,
         job.GetCtx(),
         "PUT",
         fmt.Sprintf("%s/schemas/relative-paths/%s", entityPath, relativePath),
-        reqData,
-        token)
+        RequestOptions{
+			Token: token,
+			Body: reqData,
+		})
     if err != nil {
         return
     }
@@ -812,8 +896,9 @@ func (job *AquiferJob) SendResponse(event *AquiferEvent) (err error) {
         job.GetCtx(),
         "POST",
         fmt.Sprintf("/deployments/%s/events", job.service.deploymentName),
-        reqData,
-        job.service.deploymentToken)
+        RequestOptions{
+			Body: reqData,
+		})
 	return
 }
 

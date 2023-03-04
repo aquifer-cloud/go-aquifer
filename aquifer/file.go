@@ -265,8 +265,9 @@ func (file *AquiferFile) ensureDownloadUrl(ctx context.Context) (err error) {
 				file.accountId,
 				jobPath,
 				file.fileId),
-			nil,
-			token)
+			RequestOptions{
+				Token: token,
+			})
 		if err != nil {
 			return
 		}
@@ -376,8 +377,10 @@ func (file *AquiferFile) uploadInit() (err error) {
 		fmt.Sprintf("/accounts/%s/%s/upload",
 			file.accountId,
 			file.getPathType()),
-		reqData,
-		token)
+		RequestOptions{
+			Token: token,
+			Body: reqData,
+		})
 	if err != nil {
 		return
 	}
@@ -417,8 +420,10 @@ func (file *AquiferFile) uploadPart(chunk []byte) (err error) {
 		fmt.Sprintf("/accounts/%s/%s/upload",
 			file.accountId,
 			file.getPathType()),
-		reqData,
-		token)
+		RequestOptions{
+			Token: token,
+			Body: reqData,
+		})
 	if err != nil {
 		return
 	}
@@ -482,8 +487,10 @@ func (file *AquiferFile) uploadComplete() (err error) {
 		fmt.Sprintf("/accounts/%s/%s/upload/complete",
 			file.accountId,
 			file.getPathType()),
-		reqData,
-		token)
+		RequestOptions{
+			Token: token,
+			Body: reqData,
+		})
 
 	return
 }
@@ -507,8 +514,10 @@ func (file *AquiferFile) uploadCancel() (err error) {
 		fmt.Sprintf("/accounts/%s/%s/upload/complete",
 			file.accountId,
 			file.getPathType()),
-		reqData,
-		token)
+		RequestOptions{
+			Token: token,
+			Body: reqData,
+		})
 
 	return
 }

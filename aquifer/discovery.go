@@ -128,15 +128,17 @@ func discoverScalarSchema(path []string, value interface{}) (jsonType string, js
     return
 }
 
-var IntegerRegex *regexp.Regexp = regexp.MustCompile("^[0-9]+$")
-var NumberRegex *regexp.Regexp = regexp.MustCompile("^[0-9]*\\.[0-9]+$")
+var IntegerRegex *regexp.Regexp = regexp.MustCompile("^[\\-|\\+]?[0-9]+$")
+var NumberRegex *regexp.Regexp = regexp.MustCompile("^[\\-|\\+]?[0-9]*\\.[0-9]+$")
 var BooleanRegex *regexp.Regexp = regexp.MustCompile("^(true|True|TRUE|T|t|false|False|FALSE|F|f)$")
 var ISO8601DateRegex *regexp.Regexp = regexp.MustCompile("^(([12]\\d{3})-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01]))$")
 var ISO8601Regex *regexp.Regexp = regexp.MustCompile("^(([12]\\d{3})-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01]))(T|\\s)(2[0-3]|[01][0-9]):?([0-5][0-9]):?([0-5][0-9])(\\.[0-9]+)?(Z|[+-](?:2[0-3]|[01][0-9])(?::?(?:[0-5][0-9]))?)?$")
 
 func getStringType(value string) (jsonType string, jsonFormat string) {
+    value = strings.ToLower(strings.TrimSpace(value))
+
     jsonType = "string"
-    if strings.ToLower(value) == "null" {
+    if value == "" || value == "null" {
         jsonType = "null"
     } else if IntegerRegex.MatchString(value) {
         jsonType = "integer"

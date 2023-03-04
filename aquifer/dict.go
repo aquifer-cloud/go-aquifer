@@ -6,6 +6,10 @@ import (
 
 type Dict map[string]interface{}
 
+func ToDict(item interface{}) Dict {
+	return Dict(item.(map[string]interface{}))
+}
+
 func (d Dict) Get(k string) Dict {
    v, exists := d[k]
 	if exists && v != nil {

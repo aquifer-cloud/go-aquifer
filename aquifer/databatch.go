@@ -20,6 +20,7 @@ type DataBatchInterface interface {
     GetSnapshotVersion() int
     GetIdempotentId() string
     GetHyperbatchId() *uuid.UUID
+    GetSchemaExists() bool
     GetJsonSchema() map[string]interface{}
     GetCount() int
     IsFull() bool
@@ -42,6 +43,7 @@ type DataBatch struct {
     jsonSchema map[string]interface{}
     schemaExists bool
     allowDiscovery bool
+    enabledTransform bool
     maxCount int
     maxByteSize int
     recordsBuffer bytes.Buffer
@@ -89,7 +91,8 @@ func NewDataBatch(service *AquiferService,
                   snapshotVersion int,
                   jsonSchema map[string]interface{},
                   schemaExists bool,
-                  allowDiscovery bool) (*DataBatch) {
+                  allowDiscovery bool,
+                  enabledTransform bool) (*DataBatch) {
     id := uuid.New()
     dataBatch := &DataBatch{
         AquiferFile: NewAquiferFile(service,
@@ -111,6 +114,9 @@ func NewDataBatch(service *AquiferService,
         maxCount: 1000000,
         maxByteSize: 1024 * 1024 * 16,
         count: 0,
+        schemaExists: schemaExists,
+        allowDiscovery: allowDiscovery,
+        enabledTransform: enabledTransform,
     }
 
     getAttributes := func (file *AquiferFile) (attributes Dict, err error) {
@@ -158,6 +164,10 @@ func (databatch *DataBatch) GetHyperbatchId() *uuid.UUID {
     return databatch.hyperbatchId
 }
 
+func (databatch *DataBatch) GetSchemaExists() bool {
+    return databatch.schemaExists
+}
+
 func (databatch *DataBatch) GetJsonSchema() map[string]interface{} {
     return databatch.jsonSchema
 }
@@ -181,6 +191,34 @@ func (databatch *DataBatch) AddRecord(record map[string]interface{}, messageSequ
         return
     }
 
+    // TODO: threadsafe?
+    databatch.count += 1
+    if !databatch.schemaExists && databatch.allowDiscovery {
+        databatch.records = append(databatch.records, record)
+    } else {
+        if databatch.schemaExists && databatch.enabledTransform {
+            record, err = Transform(databatch.jsonSchema, record)
+            if err != nil {
+                return
+            }
+        }
+
+        err = databatch.bufferRecord(record)
+        if err != nil {
+            return
+        }
+    }
+
+    // Need thread safety - The DataOutputStream check batch messageSequences
+    atomic.CompareAndSwapUint64(&databatch.firstMessageSequence, 0, messageSequence)
+
+    if databatch.recordsBuffer.Len() >= databatch.chunkSize {
+        err = databatch.flushRecords()
+    }
+    return
+}
+
+func (databatch *DataBatch) bufferRecord(record map[string]interface{}) (err error) {
     var recordsBytes []byte
     recordsBytes, err = json.Marshal(record)
     if err != nil {
@@ -194,19 +232,6 @@ func (databatch *DataBatch) AddRecord(record map[string]interface{}, messageSequ
     _, err = databatch.recordsBuffer.Write([]byte{'\n'})
     if err != nil {
         return
-    }
-
-    // TODO: threadsafe?
-    databatch.count += 1
-    if !databatch.schemaExists {
-        databatch.records = append(databatch.records, record)
-    }
-
-    // Need thread safety - The DataOutputStream check batch messageSequences
-    atomic.CompareAndSwapUint64(&databatch.firstMessageSequence, 0, messageSequence)
-
-    if databatch.recordsBuffer.Len() >= databatch.chunkSize {
-        err = databatch.flushRecords()
     }
     return
 }
@@ -227,6 +252,24 @@ func (databatch *DataBatch) Complete() (err error) {
             return
         }
         databatch.schemaExists = true
+
+        properties := databatch.jsonSchema["properties"].(map[string]interface{})
+        properties["__aq_id"] = map[string]interface{}{
+            "type": "string",
+            "primaryKey": true,
+            "format": "uuid",
+        }
+
+        for _, record := range databatch.records {
+            record, err = Transform(databatch.jsonSchema, record)
+            if err != nil {
+                return
+            }
+            err = databatch.bufferRecord(record)
+            if err != nil {
+                return
+            }
+        }
     }
 
     databatch.logger.

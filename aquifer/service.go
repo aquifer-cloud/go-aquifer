@@ -360,12 +360,20 @@ func (service *AquiferService) SetSchemaSyncHandler(fn func(JobInterface) error)
     service.schemaSyncHandler = fn
 }
 
+type RequestOptions struct {
+    Token string
+    Body interface{}
+    Ignore404 bool
+}
+
 func (service *AquiferService) Request(ctx context.Context,
 									   method string,
 	                                   path string,
-	                                   body interface{},
-	                                   token string) (data Dict, err error) {
-    if token == "" {
+	                                   options RequestOptions) (data Dict, err error) {
+    var token string
+    if options.Token != "" {
+        token = options.Token
+    } else {
     	token = service.deploymentToken
     }
 
@@ -377,12 +385,16 @@ func (service *AquiferService) Request(ctx context.Context,
 		SetContext(ctx).
 		SetResult(&data)
 
-	if body != nil {
-		req = req.SetBody(body)
+	if options.Body != nil {
+		req = req.SetBody(options.Body)
 	}
 
 	var resp *resty.Response
 	resp, err = req.Execute(method, url)
+
+    if options.Ignore404 && resp.StatusCode() == 404 {
+        return
+    }
 
 	if resp.StatusCode() > 299 {
 		err = fmt.Errorf("Non-200 status code: %d %s %s",
@@ -416,8 +428,7 @@ func (service *AquiferService) GetEntityToken(ctx context.Context,
 		ctx,
 		"POST",
 		fmt.Sprintf("%s/token", entityPath),
-		nil,
-	    "")
+		RequestOptions{})
 	if err != nil {
 		return
 	}
@@ -599,8 +610,28 @@ func (service *AquiferService) GetCli() *cli.App {
                             dryRunFlag,
                         },
                         Action: func(cCtx *cli.Context) error {
-                            fmt.Println("new task template: ", cCtx.Args().First())
-                            return nil
+                            accountIdStr := cCtx.String("account-id")
+                            entityType := cCtx.String("entity-type")
+                            entityIdStr := cCtx.String("entity-id")
+                            flowIdStr := cCtx.String("flow-id")
+
+                            job, err := NewJobFromCLI(
+                                service,
+                                context.Background(),
+                                "extract",
+                                accountIdStr,
+                                flowIdStr,
+                                entityType,
+                                entityIdStr)
+                            if err != nil {
+                                return err
+                            }
+                            err = job.Lock()
+                            if err != nil {
+                                return err
+                            }
+
+                            return service.extractHandler(job)
                         },
                     },
                 },

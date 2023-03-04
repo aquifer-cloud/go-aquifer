@@ -37,6 +37,7 @@ type DataOutputStream struct {
     entityType string
     entityId *uuid.UUID
     allowDiscovery bool
+    enabledTransform bool
     metricsSource string
     schemas map[string](map[string]interface{})
     schemasLock sync.Mutex
@@ -57,7 +58,8 @@ func NewDataOutputStream(service *AquiferService,
 	                     entityType string,
     					 entityId *uuid.UUID,
     	                 metricsSource string,
-                         allowDiscovery bool) (*DataOutputStream) {
+                         allowDiscovery bool,
+                         enabledTransform bool) (*DataOutputStream) {
 	outputstream := DataOutputStream{
 		service: service,
 		logger: log.Ctx(ctx),
@@ -67,6 +69,7 @@ func NewDataOutputStream(service *AquiferService,
 		entityType: entityType,
 		entityId: entityId,
         allowDiscovery: allowDiscovery,
+        enabledTransform: enabledTransform,
 		metricsSource: metricsSource,
 		schemas: make(map[string](map[string]interface{})),
         states: orderedmap.NewOrderedMap[uint64, map[string]interface{}](),
@@ -127,22 +130,29 @@ func (outputstream *DataOutputStream) FetchState() (err error) {
         fmt.Sprintf("/accounts/%s/jobs/%s/state",
             outputstream.job.GetAccountId(),
             outputstream.job.GetId()),
-        nil,
-        token)
+        RequestOptions{
+            Token: token,
+            Ignore404: true,
+        })
     if err != nil {
         return
     }
 
-    flushedState := data.Get("data").Get("attributes").Get("state").Map()
+    if data != nil {
+        flushedState := data.Get("data").Get("attributes").Get("state").Map()
 
-    outputstream.flushedState = flushedState
+        outputstream.flushedState = flushedState
 
-    var nextState interface{}
-    nextState, err = deepcopy.Anything(flushedState)
-    if err != nil {
-        return
+        var nextState interface{}
+        nextState, err = deepcopy.Anything(flushedState)
+        if err != nil {
+            return
+        }
+        outputstream.nextState = nextState.(map[string]interface{})
+    } else {
+        outputstream.flushedState = make(map[string]interface{})
+        outputstream.nextState = make(map[string]interface{})
     }
-    outputstream.nextState = nextState.(map[string]interface{})
 
     return
 }
@@ -251,9 +261,9 @@ func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-c
             }
 
             currentMessageSequence := atomic.AddUint64(&outputstream.messageSequence, 1)
+            relativePath := message.RelativePath
 
             if message.Type == Record {
-                relativePath := message.RelativePath
                 if !outputstream.allowDiscovery && !outputstream.HasSchema(relativePath) {
                     err = fmt.Errorf("Error schema not found: %s", relativePath)
                     return
@@ -282,7 +292,8 @@ func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-c
                                              message.SnapshotVersion,
     										 jsonSchema,
     										 schemaExists,
-                                             outputstream.allowDiscovery)
+                                             outputstream.allowDiscovery,
+                                             outputstream.enabledTransform)
     				workerBatches[relativePath] = dataBatch
                     outputstream.currentBatches.Store(
                         fmt.Sprintf("%d%s", workerId, relativePath),
@@ -300,6 +311,9 @@ func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-c
     				if err != nil {
     					return
     				}
+                    if !outputstream.HasSchema(relativePath) && dataBatch.GetSchemaExists() {
+                        outputstream.SetSchema(relativePath, dataBatch.GetJsonSchema())
+                    }
     				delete(workerBatches, relativePath)
                     outputstream.currentBatches.Delete(fmt.Sprintf("%d%s", workerId, relativePath))
     			}
@@ -319,6 +333,17 @@ func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-c
                 // TODO: update existing batch schemas?
                 outputstream.SetSchema(message.RelativePath, message.Data)
             } else if message.Type == SnapshotComplete {
+                dataBatch, batchFound := workerBatches[relativePath]
+                if batchFound {
+                    outputstream.logger.Info().Msgf("Complete DataBatch: %s", relativePath)
+                    err = dataBatch.Complete()
+                    if err != nil {
+                        return
+                    }
+                    delete(workerBatches, relativePath)
+                    outputstream.currentBatches.Delete(fmt.Sprintf("%d%s", workerId, relativePath))
+                }
+
                 err = outputstream.CompleteSnapshot(message.RelativePath, message.SnapshotVersion)
                 if err != nil {
                     return
@@ -366,8 +391,10 @@ func (outputstream *DataOutputStream) CompleteSnapshot(relativePath string,
 		outputstream.ctx,
 		"POST",
 		fmt.Sprintf("/accounts/%s/snapshots", outputstream.job.GetAccountId()),
-		reqData,
-		token)
+		RequestOptions{
+            Token: token,
+            Body: reqData,
+        })
 	return
 }
 
@@ -390,11 +417,13 @@ func (outputstream *DataOutputStream) doFlush(state map[string]interface{}) (err
 
     _, err = outputstream.service.Request(
         outputstream.ctx,
-        "POST",
+        "PUT",
         fmt.Sprintf("/accounts/%s/jobs/%s/state",
             outputstream.job.GetAccountId(),
             outputstream.job.GetId()),
-        reqData,
-        token)
+        RequestOptions{
+            Token: token,
+            Body: reqData,
+        })
     return
 }
