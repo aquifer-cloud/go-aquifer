@@ -38,6 +38,8 @@ type DataOutputStream struct {
     entityId *uuid.UUID
     allowDiscovery bool
     enabledTransform bool
+    maxBatchCount int
+    maxBatchByteSize int
     metricsSource string
     schemas map[string](map[string]interface{})
     schemasLock sync.Mutex
@@ -59,7 +61,9 @@ func NewDataOutputStream(service *AquiferService,
     					 entityId *uuid.UUID,
     	                 metricsSource string,
                          allowDiscovery bool,
-                         enabledTransform bool) (*DataOutputStream) {
+                         enabledTransform bool,
+                         maxBatchCount int,
+                         maxBatchByteSize int) (*DataOutputStream) {
 	outputstream := DataOutputStream{
 		service: service,
 		logger: log.Ctx(ctx),
@@ -70,6 +74,8 @@ func NewDataOutputStream(service *AquiferService,
 		entityId: entityId,
         allowDiscovery: allowDiscovery,
         enabledTransform: enabledTransform,
+        maxBatchCount: maxBatchCount,
+        maxBatchByteSize: maxBatchByteSize,
 		metricsSource: metricsSource,
 		schemas: make(map[string](map[string]interface{})),
         states: orderedmap.NewOrderedMap[uint64, map[string]interface{}](),
@@ -94,6 +100,22 @@ func (outputstream *DataOutputStream) HasSchema(relativePath string) (found bool
 	defer outputstream.schemasLock.Unlock()
 	_, found = outputstream.schemas[relativePath]
 	return
+}
+
+func (outputstream *DataOutputStream) GetMaxBatchCount() int {
+    return outputstream.maxBatchCount
+}
+
+func (outputstream *DataOutputStream) SetMaxBatchCount(maxBatchCount int) {
+    outputstream.maxBatchCount = maxBatchCount
+}
+
+func (outputstream *DataOutputStream) GetMaxBatchByteSize() int {
+    return outputstream.maxBatchByteSize
+}
+
+func (outputstream *DataOutputStream) SetMaxBatchByteSize(maxBatchByteSize int) {
+    outputstream.maxBatchByteSize = maxBatchByteSize
 }
 
 func (outputstream *DataOutputStream) SetSchema(relativePath string, schema map[string]interface{}) {
@@ -293,7 +315,9 @@ func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-c
     										 jsonSchema,
     										 schemaExists,
                                              outputstream.allowDiscovery,
-                                             outputstream.enabledTransform)
+                                             outputstream.enabledTransform,
+                                             outputstream.maxBatchCount,
+                                             outputstream.maxBatchByteSize)
     				workerBatches[relativePath] = dataBatch
                     outputstream.currentBatches.Store(
                         fmt.Sprintf("%d%s", workerId, relativePath),

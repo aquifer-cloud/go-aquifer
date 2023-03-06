@@ -92,7 +92,16 @@ func NewDataBatch(service *AquiferService,
                   jsonSchema map[string]interface{},
                   schemaExists bool,
                   allowDiscovery bool,
-                  enabledTransform bool) (*DataBatch) {
+                  enabledTransform bool,
+                  maxCount int,
+                  maxByteSize int) (*DataBatch) {
+    if maxCount == 0 {
+        maxCount = 100000
+    }
+    if maxByteSize == 0 {
+        maxByteSize = 1024 * 1024 * 16 // 16 MB
+    }
+
     id := uuid.New()
     dataBatch := &DataBatch{
         AquiferFile: NewAquiferFile(service,
@@ -110,9 +119,8 @@ func NewDataBatch(service *AquiferService,
         sequence: int(time.Now().UTC().Unix()),
         relativePath: relativePath,
         jsonSchema: jsonSchema,
-        // TODO: make maxCount and maxByteSize settable
-        maxCount: 1000000,
-        maxByteSize: 1024 * 1024 * 16,
+        maxCount: maxCount,
+        maxByteSize: maxByteSize,
         count: 0,
         schemaExists: schemaExists,
         allowDiscovery: allowDiscovery,

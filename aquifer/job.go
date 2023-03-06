@@ -397,6 +397,8 @@ func (job *AquiferJob) GetDataBatch() DataBatchInterface {
 type JobOutputStreamOptions struct {
 	AllowDiscovery bool
 	EnableTransform bool
+	MaxBatchCount int
+    MaxBatchByteSize int
 }
 
 func (job *AquiferJob) GetDataOutputStream(options JobOutputStreamOptions) *DataOutputStream {
@@ -430,7 +432,9 @@ func (job *AquiferJob) GetDataOutputStream(options JobOutputStreamOptions) *Data
             job.GetEntityId(),
             metricsSource,
         	options.AllowDiscovery,
-        	options.EnableTransform)
+        	options.EnableTransform,
+        	options.MaxBatchCount,
+        	options.MaxBatchByteSize)
     }
 
     return job.dataOutputStream
