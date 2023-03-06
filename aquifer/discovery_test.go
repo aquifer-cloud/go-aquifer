@@ -18,6 +18,8 @@ func TestDiscovery(t *testing.T) {
             "some_bool": true,
             "some_other_bool": "true",
             "some_other_bool_fake": "true",
+            "some_blank_field": "",
+            "some_blank_field2": "",
         },
         map[string]interface{}{
             "id": "123",
@@ -33,7 +35,10 @@ func TestDiscovery(t *testing.T) {
             "some_nested_obj": map[string]interface{}{
                 "some_nested_field": "foo",
                 "some_nested_field_datetime": "2019-01-23T03:14:22",
+                "some_nested_blank_field": "",
             },
+            "some_blank_field": "",
+            "some_blank_field2": 223232,
         },
         map[string]interface{}{
             "id": "1277",
@@ -49,6 +54,7 @@ func TestDiscovery(t *testing.T) {
                 map[string]interface{}{
                     "some_nested_field": "foo",
                     "some_nested_field_datetime": "2019-01-23T03:14:22",
+                    "some_blank_field": "",
                 },
                 map[string]interface{}{
                     "some_nested_field": "foo",

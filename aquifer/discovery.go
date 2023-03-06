@@ -25,6 +25,46 @@ func DiscoverSchema(records []map[string]interface{}) (jsonSchema map[string]int
             }
         }
     }
+    err = defaultNullSchemas(jsonSchema)
+    return
+}
+
+func defaultNullSchemas(jsonSchema map[string]interface{}) (err error) {
+    for _, rawPropSchema := range jsonSchema["properties"].(map[string]interface{}) {
+        propSchema := rawPropSchema.(map[string]interface{})
+        rawJsonType := propSchema["type"]
+        var primaryJsonType string
+        switch rawJsonType.(type) {
+        case string:
+            primaryJsonType = rawJsonType.(string)
+            if rawJsonType.(string) == "" || rawJsonType.(string) == "null" {
+
+                propSchema["type"] = []string{"null", "string"}
+            }
+        case []string:
+            for _, jsonType := range rawJsonType.([]string) {
+                if jsonType != "null" {
+                    primaryJsonType = jsonType
+                }
+            }
+        default:
+            err = fmt.Errorf("Cannot determine schema type")
+            return
+        }
+        if primaryJsonType == "" {
+            propSchema["type"] = []string{"null", "string"}
+        } else if primaryJsonType == "object" {
+            err = defaultNullSchemas(propSchema)
+            if err != nil {
+                return
+            }
+        } else if primaryJsonType == "array" {
+            err = defaultNullSchemas(propSchema["items"].(map[string]interface{}))
+            if err != nil {
+                return
+            }
+        }
+    }
     return
 }
 
@@ -115,6 +155,7 @@ func discoverScalarSchema(path []string, value interface{}) (jsonType string, js
             jsonType = "integer"
         }
     case time.Time:
+        jsonType = "string"
         jsonFormat = "date-time"
     case bool:
         jsonType = "boolean"
@@ -209,6 +250,14 @@ func mergeSchemas(path []string, jsonSchemaA map[string]interface{}, jsonSchemaB
         return
     }
 
+    // if one is only null, while the other is not
+    if aJsonType == "" {
+        aJsonType = bJsonType
+    }
+    if bJsonType == "" {
+        bJsonType = aJsonType
+    }
+
     if aJsonType == "object" && bJsonType != "object" {
         err = fmt.Errorf("Cannot merge object with non-object: %v", path)
         return
@@ -261,7 +310,7 @@ func mergeSchemas(path []string, jsonSchemaA map[string]interface{}, jsonSchemaB
             "type": "array",
             "items": itemsSchema,
         }
-    } else {
+    } else if aJsonType != "" { // both should either bull blank or not blank at this point
         var outJsonType string
         var outJsonFormat string
         if bJsonType == "" { // it was null / blank
@@ -288,6 +337,11 @@ func mergeSchemas(path []string, jsonSchemaA map[string]interface{}, jsonSchemaB
         if outJsonFormat != "" {
             jsonSchema["format"] = outJsonFormat
         }
+    } else { // both are blank
+        jsonSchema = map[string]interface{}{
+            "type": "null",
+        }
+        return
     }
 
     if aNullable || bNullable {

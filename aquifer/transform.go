@@ -237,7 +237,7 @@ func transformScalar(path []string,
         case "boolean":
             out, err = strconv.ParseBool(valueStr)
         default:
-            err = fmt.Errorf("Incompatible transformation types: %s %T", jsonType, value)
+            err = fmt.Errorf("Incompatible transformation types: %v %s %T", path, jsonType, value)
         }
     case int, int8, int32, int64:
         switch jsonType {
@@ -246,7 +246,7 @@ func transformScalar(path []string,
         case "integer", "number":
             out = value
         default:
-            err = fmt.Errorf("Incompatible transformation types: %s %T", jsonType, value)
+            err = fmt.Errorf("Incompatible transformation types: %v %s %T", path, jsonType, value)
         }
     case float32, float64:
         switch jsonType {
@@ -262,7 +262,7 @@ func transformScalar(path []string,
         case "number":
             out = value
         default:
-            err = fmt.Errorf("Incompatible transformation types: %s %T", jsonType, value)
+            err = fmt.Errorf("Incompatible transformation types: %v %s %T", path, jsonType, value)
         }
     case bool:
         switch jsonType {
@@ -275,7 +275,7 @@ func transformScalar(path []string,
         case "boolean":
             out = value
         default:
-            err = fmt.Errorf("Incompatible transformation types: %s %T", jsonType, value)
+            err = fmt.Errorf("Incompatible transformation types: %v %s %T", path, jsonType, value)
         }
     }
     return
