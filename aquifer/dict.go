@@ -101,7 +101,7 @@ func (d Dict) SetInt(k string, v int) Dict {
 func (d Dict) GetFloat64(k string) (v float64, exists bool) {
 	var rawValue interface{}
 	rawValue, exists = d[k]
-	if exists {
+	if exists && rawValue != nil {
 		v = rawValue.(float64)
 	}
 	return
