@@ -273,6 +273,7 @@ type MockDataBatch struct {
     maxCount int
     maxByteSize int
     recordsBuffer bytes.Buffer
+    schemaExists bool
 }
 
 func NewMockDataBatch(relativePath string,
@@ -290,6 +291,7 @@ func NewMockDataBatch(relativePath string,
         sequence: int(time.Now().Unix()),
         snapshotVersion: snapshotVersion,
         hyperbatchId: hyperbatchId,
+        schemaExists: true,
     }
     return &mockDataBatch
 }
@@ -316,6 +318,10 @@ func (databatch *MockDataBatch) GetIdempotentId() string {
 
 func (databatch *MockDataBatch) GetHyperbatchId() *uuid.UUID {
     return databatch.hyperbatchId
+}
+
+func (databatch *MockDataBatch) GetSchemaExists() bool {
+    return databatch.schemaExists
 }
 
 func (databatch *MockDataBatch) GetJsonSchema() map[string]interface{} {
@@ -465,7 +471,7 @@ func (job *MockJob) GetDataBatch() DataBatchInterface {
     return job.databatch
 }
 
-func (job *MockJob) GetDataOutputStream() *DataOutputStream {
+func (job *MockJob) GetDataOutputStream(options JobOutputStreamOptions) *DataOutputStream {
     return nil
 }
 
