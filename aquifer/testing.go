@@ -498,3 +498,7 @@ func (job *MockJob) NewEvent(eventType string,
 func (job *MockJob) SendResponse(event *AquiferEvent) (err error) {
     return
 }
+
+func (job *MockJob) CreateFile() *AquiferFile {
+    return nil
+}

@@ -186,8 +186,9 @@ func transformValue(path []string,
             }
             itemType := reflect.TypeOf(value)
             if itemType.Kind() == reflect.Slice {
-                outArray := make([]interface{}, itemType.Len())
-                for i, item := range value.([]interface{}) {
+                valueArray := value.([]interface{})
+                outArray := make([]interface{}, len(valueArray))
+                for i, item := range valueArray {
                     outArray[i], err = transformValue(newPath, itemsSchema, item, handlers)
                     if err != nil {
                         return
@@ -201,11 +202,15 @@ func transformValue(path []string,
                 }
                 out = []interface{}{value}
             }
+            return
         } else {
             return transformScalar(path,
                                    primaryJsonType,
                                    value)
         }
+    } else {
+        err = jsonSchemaError(path, "No JSON Schema `type`")
+        return
     }
     // TODO: anyOf, allOf, and oneOf
     // exhausted all valid options
@@ -236,6 +241,23 @@ func transformScalar(path []string,
             out, err = strconv.ParseFloat(valueStr, 64)
         case "boolean":
             out, err = strconv.ParseBool(valueStr)
+        default:
+            err = fmt.Errorf("Incompatible transformation types: %v %s %T", path, jsonType, value)
+        }
+    case json.Number:
+        valueJson := value.(json.Number)
+        switch jsonType {
+        case "string":
+            out = valueJson.String()
+        case "integer":
+            var tmpInt int64
+            tmpInt, err = valueJson.Int64()
+            if err != nil {
+                return
+            }
+            out = int(tmpInt)
+        case "number":
+            out, err = valueJson.Float64()
         default:
             err = fmt.Errorf("Incompatible transformation types: %v %s %T", path, jsonType, value)
         }

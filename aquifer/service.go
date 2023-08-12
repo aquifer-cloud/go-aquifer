@@ -34,6 +34,7 @@ type AquiferService struct {
 	workerId string
 	deploymentName string
 	deploymentToken string
+    isAccountDeployment bool
 	tokenCache *ttlcache.Cache[string, string]
     connectionTestHandler func(JobInterface) error
 	fileHandler func(JobInterface) error
@@ -48,6 +49,7 @@ type AquiferService struct {
 type ServiceOptions struct {
     DeploymentName *string
     DeploymentToken *string
+    IsAccountDeployment *bool
     BaseUrl *string
     WorkerId *string
     ApiRetriesMax *int
@@ -75,6 +77,13 @@ func NewService(options *ServiceOptions) *AquiferService {
         deploymentToken = os.Getenv("AQUIFER_TOKEN")
     } else {
         deploymentToken = *options.DeploymentToken
+    }
+
+    var isAccountDeployment bool
+    if options.IsAccountDeployment == nil {
+        isAccountDeployment = os.Getenv("AQUIFER_ACCOUNT_DEPLOYMENT") == "true"
+    } else {
+        isAccountDeployment = *options.IsAccountDeployment
     }
 
 	var workerId string
@@ -122,6 +131,7 @@ func NewService(options *ServiceOptions) *AquiferService {
 		workerId: workerId,
 		deploymentName: deploymentName,
 		deploymentToken: deploymentToken,
+        isAccountDeployment: isAccountDeployment,
 		tokenCache: ttlcache.New[string, string](
 			ttlcache.WithTTL[string, string](time.Hour * 24 * 7), // 7 days
             ttlcache.WithDisableTouchOnHit[string, string](),
@@ -129,6 +139,14 @@ func NewService(options *ServiceOptions) *AquiferService {
 		),
 	}
 	return &service
+}
+
+func (service *AquiferService) SetIsAccountDeployment(isAccountDeployment bool) {
+    service.isAccountDeployment = isAccountDeployment
+}
+
+func (service *AquiferService) GetIsAccountDeployment() bool {
+    return service.isAccountDeployment
 }
 
 func (service *AquiferService) worker(ctx context.Context,
@@ -480,6 +498,10 @@ func (service *AquiferService) GetCli() *cli.App {
                 // Value: fmt.Sprintf("%s-0", service.deploymentName),
                 // EnvVars: "AQUIFER_WORKER_ID",
             },
+            &cli.BoolFlag{
+                Name: "account-deployment",
+                Usage: "Account specific Aquifer deployment",
+            },
         },
         Commands: []*cli.Command{
             {
@@ -547,6 +569,11 @@ func (service *AquiferService) GetCli() *cli.App {
                             accountIdStr := cCtx.String("account-id")
                             entityType := cCtx.String("entity-type")
                             entityIdStr := cCtx.String("entity-id")
+                            accountDeployment := cCtx.Bool("account-deployment")
+
+                            if accountDeployment {
+                                service.SetIsAccountDeployment(accountDeployment)
+                            }
 
                             var accountId uuid.UUID
                             accountId, err = uuid.Parse(accountIdStr)
@@ -614,6 +641,11 @@ func (service *AquiferService) GetCli() *cli.App {
                             entityType := cCtx.String("entity-type")
                             entityIdStr := cCtx.String("entity-id")
                             flowIdStr := cCtx.String("flow-id")
+                            accountDeployment := cCtx.Bool("account-deployment")
+
+                            if accountDeployment {
+                                service.SetIsAccountDeployment(accountDeployment)
+                            }
 
                             job, err := NewJobFromCLI(
                                 service,

@@ -10,6 +10,27 @@ func ToDict(item interface{}) Dict {
 	return Dict(item.(map[string]interface{}))
 }
 
+func (d Dict) Copy() Dict {
+	cp := make(Dict)
+	for k, v := range d {
+		vm, ok := v.(Dict)
+		if ok {
+			cp[k] = vm.Copy()
+		} else {
+			cp[k] = v
+		}
+	}
+	return cp
+}
+
+func (d Dict) Merge(d2 Dict) Dict {
+	d1 := d.Copy()
+	for key, value := range d2 {
+		d1[key] = value
+	}
+	return d1
+}
+
 func (d Dict) Get(k string) Dict {
    v, exists := d[k]
 	if exists && v != nil {
@@ -108,6 +129,19 @@ func (d Dict) GetFloat64(k string) (v float64, exists bool) {
 }
 
 func (d Dict) SetFloat64(k string, v float64) Dict {
+   d[k] = v
+   return d
+}
+
+func (d Dict) GetBool(k string) (v bool) {
+	rawValue, exists := d[k]
+	if exists && rawValue != nil {
+		v = rawValue.(bool)
+	}
+	return
+}
+
+func (d Dict) SetBool(k string, v bool) Dict {
    d[k] = v
    return d
 }
