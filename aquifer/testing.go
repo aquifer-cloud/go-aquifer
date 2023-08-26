@@ -83,10 +83,17 @@ func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
 
     httpmock.RegisterResponder(
         "GET",
-        "=~.*/accounts/([^/]+)/jobs/([^/]+)/extracts.*",
+        "=~.*/catalog-types/(datastore|integration)/([^/]+)",
+        func(req *http.Request) (resp *http.Response, err error) {
+            return httpmock.NewJsonResponse(200, map[string]interface{}{})
+        })
+
+    httpmock.RegisterResponder(
+        "GET",
+        "=~.*/accounts/([^/]+)/(job|flows)/([^/]+)/extracts.*",
         func(req *http.Request) (resp *http.Response, err error) {
             var jobId string
-            jobId, err = httpmock.GetSubmatch(req, 2)
+            jobId, err = httpmock.GetSubmatch(req, 3)
             if err != nil {
                 return
             }
@@ -463,6 +470,10 @@ func (job *MockJob) GetHyperbatchId() *uuid.UUID {
     return nil
 }
 
+func (job *MockJob) SetHyperbatchId(hyperbatchId uuid.UUID) {
+    return
+}
+
 func (job *MockJob) SetDataBatch(databatch DataBatchInterface) {
     job.databatch = databatch
 }
@@ -501,4 +512,11 @@ func (job *MockJob) SendResponse(event *AquiferEvent) (err error) {
 
 func (job *MockJob) CreateFile() *AquiferFile {
     return nil
+}
+
+func (job *MockJob) CreateFileDownload(relativePath string,
+                                          url string,
+                                          metadata Dict,
+                                          metadataSchema Dict) (err error) {
+    return
 }
