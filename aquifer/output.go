@@ -348,9 +348,11 @@ func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-c
                 if err != nil {
                     return
                 }
-                err = outputstream.FlushState(false)
-                if err != nil {
-                    return
+                if outputstream.job.GetId() != nil {
+                    err = outputstream.FlushState(false)
+                    if err != nil {
+                        return
+                    }
                 }
             } else if message.Type == SchemaUpdate {
                 // TODO: flush existing batch

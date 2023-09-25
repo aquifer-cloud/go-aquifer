@@ -39,7 +39,6 @@ func transformObject(path []string,
                      schema map[string]interface{},
                      obj map[string]interface{},
                      handlers TransformHandlers) (out map[string]interface{}, err error) {
-    out = make(map[string]interface{})
     var (
         exists bool
         selected bool
@@ -47,6 +46,11 @@ func transformObject(path []string,
         propertiesRaw interface{}
     )
     propertiesRaw, exists = schema["properties"]
+    if !exists {
+        out = obj
+        return
+    }
+    out = make(map[string]interface{})
     properties, assertionOk := propertiesRaw.(map[string]interface{})
     if exists && assertionOk {
         for fieldName, fieldSchemaRaw := range properties {
@@ -121,6 +125,18 @@ func transformValue(path []string,
             return
         }
         if handler, handlerExists := handlers[complexType]; handlerExists {
+            return handler(schema, value)
+        }
+    }
+
+    formatRaw, formatExists := schema["format"]
+    if formatExists {
+        format, assertionOk := formatRaw.(string)
+        if !assertionOk {
+            err = jsonSchemaError(path, "\"format\" must be a string")
+            return
+        }
+        if handler, handlerExists := handlers[format]; handlerExists {
             return handler(schema, value)
         }
     }

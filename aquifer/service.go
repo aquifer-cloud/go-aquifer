@@ -462,7 +462,7 @@ func (service *AquiferService) GetEntityPath(accountId uuid.UUID,
 											 entityType string,
 											 entityId *uuid.UUID) (entityPath string, err error) {
 	var pathType string
-	pathType, err = getEntityPathType(entityType)
+	pathType, err = GetEntityPathType(entityType)
 	if err != nil {
 		return
 	}
@@ -563,9 +563,6 @@ func (service *AquiferService) GetCli() *cli.App {
                             dryRunFlag,
                         },
                         Action: func(cCtx *cli.Context) (err error) {
-                            jobCtx, jobCancel := context.WithCancel(context.Background())
-
-                            jobType := "schema-sync"
                             accountIdStr := cCtx.String("account-id")
                             entityType := cCtx.String("entity-type")
                             entityIdStr := cCtx.String("entity-id")
@@ -575,36 +572,20 @@ func (service *AquiferService) GetCli() *cli.App {
                                 service.SetIsAccountDeployment(accountDeployment)
                             }
 
-                            var accountId uuid.UUID
-                            accountId, err = uuid.Parse(accountIdStr)
+                            job, err := NewJobFromCLI(
+                                service,
+                                context.Background(),
+                                "schema-sync",
+                                accountIdStr,
+                                "",
+                                entityType,
+                                entityIdStr)
                             if err != nil {
-                                return
+                                return err
                             }
-
-                            var entityId uuid.UUID
-                            entityId, err = uuid.Parse(entityIdStr)
+                            err = job.Lock()
                             if err != nil {
-                                return
-                            }
-
-                            jobCtx = log.With().
-                                Str("account_id", accountIdStr).
-                                Str("job_type", jobType).
-                                Str("entity_type", entityType).
-                                Str("entity_id", entityIdStr).
-                                Logger().
-                                WithContext(jobCtx)
-                            logger := log.Ctx(jobCtx)
-
-                            job := &AquiferJob{
-                                service: service,
-                                ctx: jobCtx,
-                                logger: logger,
-                                cancel: jobCancel,
-                                accountId: accountId,
-                                entityType: entityType,
-                                entityId: &entityId,
-                                jobType: jobType,
+                                return err
                             }
 
                             return service.schemaSyncHandler(job)
@@ -723,7 +704,7 @@ func (service *AquiferService) getEvents(ctx context.Context, maxEvents int) (ev
 	return
 }
 
-func getEntityPathType(entityType string) (pathType string, err error) {
+func GetEntityPathType(entityType string) (pathType string, err error) {
 	if entityType == "integration" {
 		pathType = "integrations"
 	} else if entityType == "processor" {

@@ -276,12 +276,6 @@ func NewJobFromCLI(service *AquiferService,
         return
     }
 
-    var flowId uuid.UUID
-    flowId, err = uuid.Parse(flowIdStr)
-    if err != nil {
-        return
-    }
-
     var entityId uuid.UUID
     entityId, err = uuid.Parse(entityIdStr)
     if err != nil {
@@ -291,25 +285,38 @@ func NewJobFromCLI(service *AquiferService,
     loggerParams := log.With().
         Str("account_id", accountIdStr).
         Str("entity_type", entityType).
-        Str("entity_id", entityIdStr).
-        Str("flow_id", flowIdStr)
+        Str("entity_id", entityIdStr)
+
+    var flowId uuid.UUID
+    if flowIdStr != "" {
+        flowId, err = uuid.Parse(flowIdStr)
+        if err != nil {
+            return
+        }
+        loggerParams = loggerParams.Str("flow_id", flowIdStr)
+    }
 
     jobCtx, jobCancel := context.WithCancel(ctx)
     jobCtx = loggerParams.Logger().WithContext(jobCtx)
     logger := log.Ctx(jobCtx)
 
-    job = &AquiferJob{
+    jobVal := AquiferJob{
         service: service,
         ctx: jobCtx,
         logger: logger,
         accountId: accountId,
         entityType: entityType,
         entityId: &entityId,
-        flowId: &flowId,
         jobType: jobType,
         cancel: jobCancel,
         timeout_sec: 3600,
     }
+
+    if flowIdStr != "" {
+        jobVal.flowId = &flowId
+    }
+    job = &jobVal
+
     return
 }
 
@@ -388,7 +395,6 @@ func (job *AquiferJob) IsTimedout() bool {
 }
 
 func (job *AquiferJob) GetTimeout() time.Duration {
-    
     return time.Duration(job.timeout_sec) * time.Second
 }
 
