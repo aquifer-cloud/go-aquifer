@@ -718,58 +718,55 @@ func (job *AquiferJob) Touch() (err error) {
     job.touchLock.Lock()
     defer job.touchLock.Unlock()
 
-    touched := false
+    if job.locked && time.Now().Sub(job.lastTouch).Seconds() >= 60.0 {
+        if job.jobId != nil {
+            var token string
+            token, err = job.service.GetEntityToken(job.ctx, job.accountId, job.entityType, job.entityId)
+            if err != nil {
+                return
+            }
 
-    if job.jobId != nil && job.locked && time.Now().Sub(job.lastTouch).Seconds() >= 60.0 {
-        var token string
-        token, err = job.service.GetEntityToken(job.ctx, job.accountId, job.entityType, job.entityId)
-        if err != nil {
-            return
+            attributes := make(Dict)
+
+            if !job.ackImmediately && job.event.Destination.Handle != "" {
+                attributes = attributes.SetString("handle", job.event.Destination.Handle)
+            }
+
+            reqData := make(Dict).
+                Set("data", make(Dict).
+                    SetString("type", fmt.Sprintf("%s-touch", job.getLockPrefix())).
+                    Set("attributes", attributes))
+
+            _, err = job.service.Request(
+                job.ctx,
+                "POST",
+                fmt.Sprintf("%s/locks/%s/touch", job.getJobPath(), job.lockId.String()),
+                RequestOptions{
+                    Token: token,
+                    Body: reqData,
+                })
+            if err != nil {
+                return
+            }
+        } else if job.event.Destination.Handle != "" {
+            reqData := make(Dict).
+                Set("data", make(Dict).
+                    SetString("type", "deployment-event-touch").
+                    Set("attributes", make(Dict).
+                        SetString("handle", job.event.Destination.Handle)))
+
+            _, err = job.service.Request(
+                job.ctx,
+                "POST",
+                fmt.Sprintf("/deployments/%s/events/touch", job.service.deploymentName),
+                RequestOptions{
+                    Body: reqData,
+                })
+            if err != nil {
+                return
+            }
         }
 
-        attributes := make(Dict)
-
-        if !job.ackImmediately && job.event.Destination.Handle != "" {
-            attributes = attributes.SetString("handle", job.event.Destination.Handle)
-        }
-
-        reqData := make(Dict).
-            Set("data", make(Dict).
-                SetString("type", fmt.Sprintf("%s-touch", job.getLockPrefix())).
-                Set("attributes", attributes))
-
-        _, err = job.service.Request(
-            job.ctx,
-            "POST",
-            fmt.Sprintf("%s/locks/%s/touch", job.getJobPath(), job.lockId.String()),
-            RequestOptions{
-                Token: token,
-                Body: reqData,
-            })
-        if err != nil {
-            return
-        }
-        touched = true
-    } else if job.jobId == nil && job.locked {
-        reqData := make(Dict).
-            Set("data", make(Dict).
-                SetString("type", "deployment-event-touch").
-                Set("attributes", make(Dict).
-                    SetString("handle", job.event.Destination.Handle)))
-
-        _, err = job.service.Request(
-            job.ctx,
-            "POST",
-            fmt.Sprintf("/deployments/%s/events/touch", job.service.deploymentName),
-            RequestOptions{
-                Body: reqData,
-            })
-        if err != nil {
-            return
-        }
-        touched = true
-    }
-    if touched {
         job.lastTouch = time.Now()
         job.cancelTimer.Reset(job.GetTimeout())
     }
