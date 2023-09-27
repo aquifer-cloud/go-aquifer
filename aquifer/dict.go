@@ -98,17 +98,13 @@ func (d Dict) GetInt(k string) (v int, exists bool) {
 		switch rawValue.(type) {
 		case int:
 			v = rawValue.(int)
-			break
 		case float64:
 			v = int(rawValue.(float64))
-			break
 		case int64:
 			v = int(rawValue.(int64))
-			break
 		case json.Number:
 			tmp, _ := rawValue.(json.Number).Int64()
 			v = int(tmp)
-			break
 		}
 	}
 	return
@@ -123,7 +119,16 @@ func (d Dict) GetFloat64(k string) (v float64, exists bool) {
 	var rawValue interface{}
 	rawValue, exists = d[k]
 	if exists && rawValue != nil {
-		v = rawValue.(float64)
+		switch rawValue.(type) {
+		case int:
+			v = float64(rawValue.(int))
+		case float64:
+			v = rawValue.(float64)
+		case int64:
+			v = float64(rawValue.(int64))
+		case json.Number:
+			v, _ = rawValue.(json.Number).Float64()
+		}
 	}
 	return
 }
