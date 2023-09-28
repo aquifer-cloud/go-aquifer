@@ -234,7 +234,9 @@ func (outputstream *DataOutputStream) FlushState(force bool) (err error) {
         if batchCount == 0 || maxStateSequenceMatch > 0 {
             var newState map[string]interface{}
             if batchCount == 0 {
-                newState = outputstream.states.Back().Value
+                if el := outputstream.states.Back(); el != nil {
+                    newState = el.Value
+                }
             } else {
                 newState, _ = outputstream.states.Get(maxStateSequenceMatch)
             }
