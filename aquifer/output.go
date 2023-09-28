@@ -233,22 +233,26 @@ func (outputstream *DataOutputStream) FlushState(force bool) (err error) {
 
         if batchCount == 0 || maxStateSequenceMatch > 0 {
             var newState map[string]interface{}
+            newStateFound := false
             if batchCount == 0 {
                 if el := outputstream.states.Back(); el != nil {
                     newState = el.Value
+                    newStateFound = true
                 }
             } else {
-                newState, _ = outputstream.states.Get(maxStateSequenceMatch)
+                newState, newStateFound = outputstream.states.Get(maxStateSequenceMatch)
             }
 
-            err = outputstream.doFlush(newState)
-            if err != nil {
-                return
-            }
-            outputstream.flushedState = newState
-            for _, currStateSequence := range outputstream.states.Keys() {
-                if currStateSequence <= maxStateSequenceMatch {
-                    outputstream.states.Delete(currStateSequence)
+            if newStateFound {
+                err = outputstream.doFlush(newState)
+                if err != nil {
+                    return
+                }
+                outputstream.flushedState = newState
+                for _, currStateSequence := range outputstream.states.Keys() {
+                    if currStateSequence <= maxStateSequenceMatch {
+                        outputstream.states.Delete(currStateSequence)
+                    }
                 }
             }
         }
