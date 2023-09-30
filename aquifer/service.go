@@ -513,31 +513,6 @@ func (service *AquiferService) GetCli() *cli.App {
                 },
             },
             {
-                Name: "run-job-by-id",
-                Usage: "run an Aquifer job",
-                Flags: []cli.Flag{
-                    &cli.StringFlag{
-                        Name: "account-id",
-                        Usage: "Account ID for Job",
-                        Required: true,
-                    },
-                    &cli.StringFlag{
-                        Name: "job-type",
-                        Usage: "Job Type",
-                        Required: true,
-                    },
-                    &cli.StringFlag{
-                        Name: "job-id",
-                        Usage: "Job ID",
-                        Required: true,
-                    },
-                    dryRunFlag,
-                },
-                Action: func(cCtx *cli.Context) error {
-                    return nil
-                },
-            },
-            {
                 Name: "run-job",
                 Usage: "run an Aquifer job",
                 Subcommands: []*cli.Command{
@@ -560,12 +535,17 @@ func (service *AquiferService) GetCli() *cli.App {
                                 Usage: "Entity ID for Job",
                                 Required: true,
                             },
+                            &cli.StringFlag{
+                                Name: "job-id",
+                                Usage: "ID for Job",
+                            },
                             dryRunFlag,
                         },
                         Action: func(cCtx *cli.Context) (err error) {
                             accountIdStr := cCtx.String("account-id")
                             entityType := cCtx.String("entity-type")
                             entityIdStr := cCtx.String("entity-id")
+                            jobIdStr := cCtx.String("job-id")
                             accountDeployment := cCtx.Bool("account-deployment")
 
                             if accountDeployment {
@@ -579,7 +559,8 @@ func (service *AquiferService) GetCli() *cli.App {
                                 accountIdStr,
                                 "",
                                 entityType,
-                                entityIdStr)
+                                entityIdStr,
+                                jobIdStr)
                             if err != nil {
                                 return err
                             }
@@ -615,6 +596,10 @@ func (service *AquiferService) GetCli() *cli.App {
                                 Usage: "Flow ID for Job",
                                 Required: true,
                             },
+                            &cli.StringFlag{
+                                Name: "job-id",
+                                Usage: "ID for Job",
+                            },
                             dryRunFlag,
                         },
                         Action: func(cCtx *cli.Context) error {
@@ -622,6 +607,7 @@ func (service *AquiferService) GetCli() *cli.App {
                             entityType := cCtx.String("entity-type")
                             entityIdStr := cCtx.String("entity-id")
                             flowIdStr := cCtx.String("flow-id")
+                            jobIdStr := cCtx.String("job-id")
                             accountDeployment := cCtx.Bool("account-deployment")
 
                             if accountDeployment {
@@ -635,7 +621,8 @@ func (service *AquiferService) GetCli() *cli.App {
                                 accountIdStr,
                                 flowIdStr,
                                 entityType,
-                                entityIdStr)
+                                entityIdStr,
+                                jobIdStr)
                             if err != nil {
                                 return err
                             }

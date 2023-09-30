@@ -2,6 +2,7 @@ package aquifer
 
 import (
 	"fmt"
+    "time"
 	"sync"
     "sync/atomic"
 	"context"
@@ -222,6 +223,7 @@ func (outputstream *DataOutputStream) FlushState(force bool) (err error) {
             }
             return true
         })
+
         var maxStateSequenceMatch uint64 = 0
         if batchCount > 0 {
             for _, currStateSequence := range outputstream.states.Keys() {
@@ -272,6 +274,7 @@ func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-c
     workerId := atomic.AddUint64(&outputstream.workerCounter, 1)
 
 	moreMessages := true
+    batchTicker := time.NewTicker(60 * time.Second)
 	for moreMessages {
 		var message OutputMessage
 		select {
@@ -280,6 +283,26 @@ func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-c
 				dataBatch.Cancel()
 			}
 			return
+        case <-batchTicker.C:
+            if ctx.Err() != nil {
+                return
+            }
+            if !moreMessages {
+                continue
+            }
+
+            for relativePath, databatch := range workerBatches {
+                if !databatch.GetLastRecordAddedAt().IsZero() &&
+                   time.Now().Sub(databatch.GetLastRecordAddedAt()) >= (5 * time.Minute) {
+                    outputstream.logger.Info().Msgf("Complete DataBatch: %s", relativePath)
+                    err = databatch.Complete()
+                    if err != nil {
+                        return
+                    }
+                    delete(workerBatches, relativePath)
+                    outputstream.currentBatches.Delete(fmt.Sprintf("%d%s", workerId, relativePath))
+                }
+            }
         case message, moreMessages = <-outputChan:
         	if ctx.Err() != nil {
                 return
@@ -431,31 +454,33 @@ func (outputstream *DataOutputStream) CompleteSnapshot(relativePath string,
 }
 
 func (outputstream *DataOutputStream) doFlush(state map[string]interface{}) (err error) {
-    var token string
-    token, err = outputstream.service.GetEntityToken(
-        outputstream.ctx,
-        outputstream.job.GetAccountId(),
-        outputstream.entityType,
-        outputstream.entityId)
-    if err != nil {
-        return
-    }
-
-    reqData := make(Dict).
-        Set("data", make(Dict).
-            SetString("type", "state").
-            Set("attributes", make(Dict).
-                Set("state", state)))
-
-    _, err = outputstream.service.Request(
-        outputstream.ctx,
-        "PUT",
-        fmt.Sprintf("/accounts/%s/jobs/%s/state",
+    if outputstream.job.GetId() != nil {
+        var token string
+        token, err = outputstream.service.GetEntityToken(
+            outputstream.ctx,
             outputstream.job.GetAccountId(),
-            outputstream.job.GetId()),
-        RequestOptions{
-            Token: token,
-            Body: reqData,
-        })
+            outputstream.entityType,
+            outputstream.entityId)
+        if err != nil {
+            return
+        }
+
+        reqData := make(Dict).
+            Set("data", make(Dict).
+                SetString("type", "state").
+                Set("attributes", make(Dict).
+                    Set("state", state)))
+
+        _, err = outputstream.service.Request(
+            outputstream.ctx,
+            "PUT",
+            fmt.Sprintf("/accounts/%s/jobs/%s/state",
+                outputstream.job.GetAccountId(),
+                outputstream.job.GetId()),
+            RequestOptions{
+                Token: token,
+                Body: reqData,
+            })
+    }
     return
 }

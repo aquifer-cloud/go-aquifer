@@ -269,7 +269,8 @@ func NewJobFromCLI(service *AquiferService,
                    accountIdStr string,
                    flowIdStr string,
                    entityType string,
-                   entityIdStr string) (job JobInterface, err error) {
+                   entityIdStr string,
+                   jobIdStr string) (job JobInterface, err error) {
     var accountId uuid.UUID
     accountId, err = uuid.Parse(accountIdStr)
     if err != nil {
@@ -296,6 +297,15 @@ func NewJobFromCLI(service *AquiferService,
         loggerParams = loggerParams.Str("flow_id", flowIdStr)
     }
 
+    var jobId uuid.UUID
+    if jobIdStr != "" {
+        jobId, err = uuid.Parse(jobIdStr)
+        if err != nil {
+            return
+        }
+        loggerParams = loggerParams.Str("job_id", jobIdStr)
+    }
+
     jobCtx, jobCancel := context.WithCancel(ctx)
     jobCtx = loggerParams.Logger().WithContext(jobCtx)
     logger := log.Ctx(jobCtx)
@@ -315,8 +325,12 @@ func NewJobFromCLI(service *AquiferService,
     if flowIdStr != "" {
         jobVal.flowId = &flowId
     }
-    job = &jobVal
 
+    if jobIdStr != "" {
+        jobVal.jobId = &jobId
+    }
+
+    job = &jobVal
     return
 }
 

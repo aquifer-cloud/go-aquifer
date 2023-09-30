@@ -25,6 +25,7 @@ type DataBatchInterface interface {
     GetCount() int
     IsFull() bool
     AddRecord(map[string]interface{}, uint64) error
+    GetLastRecordAddedAt() time.Time
     Complete() error
     Cancel() error
     NextRecord() (map[string]interface{}, bool, error)
@@ -50,6 +51,7 @@ type DataBatch struct {
     records []map[string]interface{}
     readCurrentLine []byte
     count int
+    lastRecordAdded time.Time
 }
 
 func ReadDataBatch(job JobInterface) (*DataBatch) {
@@ -188,6 +190,10 @@ func (databatch *DataBatch) GetFirstMessageSequence() uint64 {
     return atomic.LoadUint64(&databatch.firstMessageSequence)
 }
 
+func (databatch *DataBatch) GetLastRecordAddedAt() time.Time {
+    return databatch.lastRecordAdded
+}
+
 func (databatch *DataBatch) IsFull() bool {
     return databatch.count >= databatch.maxCount ||
            databatch.GetSize() >= databatch.maxByteSize
@@ -201,6 +207,7 @@ func (databatch *DataBatch) AddRecord(record map[string]interface{}, messageSequ
 
     // TODO: threadsafe?
     databatch.count += 1
+
     if !databatch.schemaExists && databatch.allowDiscovery {
         databatch.records = append(databatch.records, record)
     } else {
@@ -216,6 +223,9 @@ func (databatch *DataBatch) AddRecord(record map[string]interface{}, messageSequ
             return
         }
     }
+
+    // TODO: threadsafe?
+    databatch.lastRecordAdded = time.Now()
 
     // Need thread safety - The DataOutputStream check batch messageSequences
     atomic.CompareAndSwapUint64(&databatch.firstMessageSequence, 0, messageSequence)
