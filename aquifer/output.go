@@ -312,7 +312,18 @@ func (outputstream *DataOutputStream) Worker(ctx context.Context, outputChan <-c
                 // TODO: flush existing batch
                 outputstream.SetSchema(message.RelativePath, message.Data)
             } else if message.Type == SnapshotComplete {
-                err = outputstream.CompleteSnapshot(message.RelativePath, message.SnapshotVersion)
+                relativePath := message.RelativePath
+                dataBatch, batchFound := workerBatches[relativePath]
+                if batchFound {
+                    err = dataBatch.Complete()
+                    if err != nil {
+                        return
+                    }
+                    delete(workerBatches, relativePath)
+                    outputstream.currentBatches.Delete(fmt.Sprintf("%d%s", workerId, relativePath))
+                }
+
+                err = outputstream.CompleteSnapshot(relativePath, message.SnapshotVersion)
                 if err != nil {
                     return
                 }

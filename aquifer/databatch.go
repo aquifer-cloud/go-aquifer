@@ -37,7 +37,7 @@ type DataBatch struct {
     sequence int
     idempotentId string
     hyperbatchId uuid.UUID
-    firstMessageSequence uint64
+    firstMessageSequence atomic.Uint64
     relativePath string
     jsonSchema map[string]interface{}
     maxCount int
@@ -162,7 +162,7 @@ func (databatch *DataBatch) GetCount() int {
 }
 
 func (databatch *DataBatch) GetFirstMessageSequence() uint64 {
-    return atomic.LoadUint64(&databatch.firstMessageSequence)
+    return databatch.firstMessageSequence.Load()
 }
 
 func (databatch *DataBatch) IsFull() bool {
@@ -193,7 +193,7 @@ func (databatch *DataBatch) AddRecord(record map[string]interface{}, messageSequ
 
     databatch.count += 1
     // Need thread safety - The DataOutputStream check batch messageSequences
-    atomic.CompareAndSwapUint64(&databatch.firstMessageSequence, 0, messageSequence)
+    databatch.firstMessageSequence.CompareAndSwap(0, messageSequence)
 
     if databatch.recordsBuffer.Len() >= databatch.chunkSize {
         err = databatch.flushRecords()

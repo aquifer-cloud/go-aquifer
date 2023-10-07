@@ -30,6 +30,7 @@ func getenv(varName string, defaultValue string) string {
 
 type AquiferService struct {
 	httpClient *resty.Client
+    accountId string
 	baseUrl string
 	workerId string
 	deploymentName string
@@ -47,6 +48,7 @@ type AquiferService struct {
 type ServiceOptions struct {
     DeploymentName *string
     DeploymentToken *string
+    AccountId *string
     BaseUrl *string
     WorkerId *string
     ApiRetriesMax *int
@@ -127,6 +129,11 @@ func NewService(options *ServiceOptions) *AquiferService {
 			ttlcache.WithCapacity[string, string](1000),
 		),
 	}
+
+    if options.AccountId != nil {
+        service.accountId = *options.AccountId
+    }
+
 	return &service
 }
 
@@ -614,15 +621,21 @@ func (service *AquiferService) getEvents(ctx context.Context, maxEvents int) (ev
 	// resty will do retries, idempotent_id makes sure we treat this as one message fetch
 	idempotentId := uuid.New().String()
 
+    path := fmt.Sprintf(
+        "/deployments/%s/events?max_messages=%d&idempotent_id=%s",
+        service.deploymentName,
+        maxEvents,
+        idempotentId)
+
+    if service.accountId != "" {
+        path = fmt.Sprintf("/accounts/%s%s", service.accountId, path)
+    }
+
 	var data Dict
 	data, err = service.Request(
 		ctx,
 		"GET",
-		fmt.Sprintf(
-			"/deployments/%s/events?max_messages=%d&idempotent_id=%s",
-			service.deploymentName,
-			maxEvents,
-			idempotentId),
+		path,
 		nil,
 	    "")
 	if err != nil {
