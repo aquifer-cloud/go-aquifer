@@ -384,6 +384,10 @@ type RequestOptions struct {
     Ignore404 bool
 }
 
+func (service *AquiferService) GetTokenCache() *ttlcache.Cache[string, string] {
+    return service.tokenCache
+}
+
 func (service *AquiferService) Request(ctx context.Context,
 									   method string,
 	                                   path string,
@@ -632,6 +636,68 @@ func (service *AquiferService) GetCli() *cli.App {
                             }
 
                             return service.extractHandler(job)
+                        },
+                    },
+                    {
+                        Name: "data-batch",
+                        Usage: "Run an data-batch load job",
+                        Flags: []cli.Flag{
+                            &cli.StringFlag{
+                                Name: "account-id",
+                                Usage: "Account ID for Job",
+                                Required: true,
+                            },
+                            &cli.StringFlag{
+                                Name: "entity-type",
+                                Usage: "Entity type for Job - integration, datastore, processor, or blobstore",
+                                Required: true,
+                            },
+                            &cli.StringFlag{
+                                Name: "entity-id",
+                                Usage: "Entity ID for Job",
+                                Required: true,
+                            },
+                            &cli.StringFlag{
+                                Name: "flow-id",
+                                Usage: "Flow ID for Job",
+                                Required: true,
+                            },
+                            &cli.StringFlag{
+                                Name: "job-id",
+                                Usage: "ID for Job",
+                            },
+                            dryRunFlag,
+                        },
+                        Action: func(cCtx *cli.Context) error {
+                            accountIdStr := cCtx.String("account-id")
+                            entityType := cCtx.String("entity-type")
+                            entityIdStr := cCtx.String("entity-id")
+                            flowIdStr := cCtx.String("flow-id")
+                            jobIdStr := cCtx.String("job-id")
+                            accountDeployment := cCtx.Bool("account-deployment")
+
+                            if accountDeployment {
+                                service.SetIsAccountDeployment(accountDeployment)
+                            }
+
+                            job, err := NewJobFromCLI(
+                                service,
+                                context.Background(),
+                                "data-batch",
+                                accountIdStr,
+                                flowIdStr,
+                                entityType,
+                                entityIdStr,
+                                jobIdStr)
+                            if err != nil {
+                                return err
+                            }
+                            err = job.Lock()
+                            if err != nil {
+                                return err
+                            }
+
+                            return service.dataHandler(job)
                         },
                     },
                 },

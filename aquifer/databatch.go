@@ -23,6 +23,8 @@ type DataBatchInterface interface {
     GetSchemaExists() bool
     GetJsonSchema() map[string]interface{}
     GetCount() int
+    GetCustomMetadata() map[string]interface{}
+    GetCustomMetadataSchema() map[string]interface{}
     IsFull() bool
     AddRecord(map[string]interface{}, uint64) error
     GetLastRecordAddedAt() time.Time
@@ -52,6 +54,8 @@ type DataBatch struct {
     readCurrentLine []byte
     count int
     lastRecordAdded time.Time
+    customMetadata map[string]interface{}
+    customMetadataSchema map[string]interface{}
 }
 
 func ReadDataBatch(job JobInterface) (*DataBatch) {
@@ -78,6 +82,8 @@ func ReadDataBatch(job JobInterface) (*DataBatch) {
         relativePath: attributes.GetString("relative_path"),
         jsonSchema: attributes.Get("json_schema"),
         count: count,
+        customMetadata: attributes.Get("custom_metadata"),
+        customMetadataSchema: attributes.Get("custom_metadata_schema"),
     }
     return dataBatch
 }
@@ -184,6 +190,14 @@ func (databatch *DataBatch) GetJsonSchema() map[string]interface{} {
 
 func (databatch *DataBatch) GetCount() int {
     return databatch.count
+}
+
+func (databatch *DataBatch) GetCustomMetadata() map[string]interface{} {
+    return databatch.customMetadata
+}
+
+func (databatch *DataBatch) GetCustomMetadataSchema() map[string]interface{} {
+    return databatch.customMetadataSchema
 }
 
 func (databatch *DataBatch) GetFirstMessageSequence() uint64 {

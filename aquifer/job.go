@@ -330,7 +330,23 @@ func NewJobFromCLI(service *AquiferService,
         jobVal.jobId = &jobId
     }
 
-    job = &jobVal
+    if jobType == "data-batch" || jobType == "file" {
+        job = FileJob{
+            AquiferJob: &jobVal,
+            File: NewAquiferFile(
+                service,
+                jobCtx,
+                "rb",
+                false, // On read, this comes from the API response
+                jobType,
+                accountId,
+                entityType,
+                &entityId,
+                &jobId),
+        }
+    } else {
+        job = &jobVal
+    }
     return
 }
 
