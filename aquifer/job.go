@@ -74,6 +74,7 @@ type JobInterface interface {
     GetEntityType() string
     GetEntityId() *uuid.UUID
     GetConfig() Dict
+    GetEntityConfig() Dict
     GetRelativePath() string
     GetSnapshotVersion() int
     GetHyperbatchId() *uuid.UUID
@@ -91,6 +92,7 @@ type JobInterface interface {
     SendResponse(*AquiferEvent) error
     CreateFile() *AquiferFile
     CreateFileDownload(string, string, Dict, Dict) error
+    UpdateConfig(map[string]interface{}) error
 }
 
 type FileJobInterface interface {
@@ -426,6 +428,10 @@ func (job *AquiferJob) IsTimedout() bool {
 
 func (job *AquiferJob) GetTimeout() time.Duration {
     return time.Duration(job.timeout_sec) * time.Second
+}
+
+func (job *AquiferJob) GetEntityConfig() Dict {
+    return job.entityAttributes.Get("config")
 }
 
 func (job *AquiferJob) GetConfig() Dict {
@@ -1005,6 +1011,39 @@ func (job *AquiferJob) CreateFile() *AquiferFile {
         job.entityType,
         job.entityId,
         &id)
+}
+
+func (job *AquiferJob) UpdateConfig(config map[string]interface{}) (err error) {
+    var entityPath string
+    entityPath, err = job.service.GetEntityPath(
+        job.accountId,
+        job.entityType,
+        job.entityId)
+    if err != nil {
+        return
+    }
+
+    var token string
+    token, err = job.service.GetEntityToken(job.GetCtx(), job.accountId, job.entityType, job.entityId)
+    if err != nil {
+        return
+    }
+
+    reqData := make(Dict).
+        Set("data", make(Dict).
+            SetString("type", job.GetEntityType()).
+            Set("attributes", make(Dict).
+                Set("config", config)))
+
+    _, err = job.service.Request(
+        job.ctx,
+        "PATCH",
+        entityPath,
+        RequestOptions{
+            Token: token,
+            Body: reqData,
+        })
+    return
 }
 
 func (job *AquiferJob) CreateFileDownload(relativePath string,
