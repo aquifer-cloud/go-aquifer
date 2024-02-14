@@ -5,6 +5,7 @@ import (
     "fmt"
     "time"
     "sync"
+    "errors"
     "context"
     netURL "net/url"
 
@@ -533,6 +534,24 @@ func (job *AquiferJob) Lock() (err error) {
                 Token: token,
                 Body: reqData,
             })
+        if errors.Is(err, HTTPNotFound) {
+            if job.event.Destination.Handle != "" {
+                reqData := make(Dict).
+                Set("data", make(Dict).
+                    SetString("type", "deployment-event").
+                    Set("attributes", make(Dict).
+                        SetString("handle", job.event.Destination.Handle)))
+
+                job.service.Request(
+                    job.ctx,
+                    "DELETE",
+                    fmt.Sprintf("/deployments/%s/events", job.service.deploymentName),
+                    RequestOptions{
+                        Body: reqData,
+                    })
+            }
+            return
+        }
         if err != nil {
             return
         }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"fmt"
 	"time"
+    "errors"
 	"runtime"
 	"context"
 	"syscall"
@@ -388,6 +389,8 @@ func (service *AquiferService) GetTokenCache() *ttlcache.Cache[string, string] {
     return service.tokenCache
 }
 
+var HTTPNotFound = errors.New("HTTP 404 Not Found")
+
 func (service *AquiferService) Request(ctx context.Context,
 									   method string,
 	                                   path string,
@@ -414,7 +417,11 @@ func (service *AquiferService) Request(ctx context.Context,
 	var resp *resty.Response
 	resp, err = req.Execute(method, url)
 
-    if options.Ignore404 && resp.StatusCode() == 404 {
+    if resp.StatusCode() == 404 {
+        if options.Ignore404 {
+            return
+        }
+        err = HTTPNotFound
         return
     }
 
@@ -746,7 +753,6 @@ func (service *AquiferService) getEvents(ctx context.Context, maxEvents int) (ev
 
     var resp *resty.Response
     resp, err = req.Execute("GET", url)
-
     if resp.StatusCode() > 299 {
         err = fmt.Errorf("Non-200 status code: %d %s",
                          resp.StatusCode(),
