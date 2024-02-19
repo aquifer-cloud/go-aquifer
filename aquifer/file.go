@@ -333,7 +333,7 @@ func (file *AquiferFile) Cancel() error {
 }
 
 func (file *AquiferFile) Flush(full bool) (err error) {
-	if file.gzipEnabled {
+	if file.gzipEnabled && full {
 		err = file.gzipWriter.Close()
 		if err != nil {
 			return
