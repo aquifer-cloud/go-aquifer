@@ -90,6 +90,19 @@ func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
 
     httpmock.RegisterResponder(
         "GET",
+        "=~.*/accounts/([^/]+)/flows/([^/]+)",
+        func(req *http.Request) (resp *http.Response, err error) {
+            return httpmock.NewJsonResponse(200, map[string]interface{}{
+                "data": map[string]interface{}{
+                    "attributes": map[string]interface{}{
+                        "name": "test_schema",
+                    },
+                },
+            })
+        })
+
+    httpmock.RegisterResponder(
+        "GET",
         "=~.*/accounts/([^/]+)/(job|flows)/([^/]+)/extracts.*",
         func(req *http.Request) (resp *http.Response, err error) {
             var jobId string
@@ -365,6 +378,18 @@ func (databatch *MockDataBatch) NextRecord() (record map[string]interface{}, exi
     return
 }
 
+func (databatch *MockDataBatch) GetCustomMetadata() map[string]interface{} {
+    return make(map[string]interface{})
+}
+
+func (databatch *MockDataBatch) GetCustomMetadataSchema() map[string]interface{} {
+    return make(map[string]interface{})
+}
+
+func (databatch *MockDataBatch) GetLastRecordAddedAt() time.Time {
+    return time.Now()
+}
+
 type MockJob struct {
     service *AquiferService
     event AquiferEvent
@@ -518,5 +543,13 @@ func (job *MockJob) CreateFileDownload(relativePath string,
                                           url string,
                                           metadata Dict,
                                           metadataSchema Dict) (err error) {
+    return
+}
+
+func (job *MockJob) GetEntityConfig() Dict {
+    return make(Dict)
+}
+
+func (job *MockJob) UpdateConfig(config map[string]interface{}) (err error) {
     return
 }

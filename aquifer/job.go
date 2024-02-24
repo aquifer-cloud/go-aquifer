@@ -92,6 +92,7 @@ type JobInterface interface {
     NewEvent(string, EventDestination, Dict) *AquiferEvent
     SendResponse(*AquiferEvent) error
     CreateFile() *AquiferFile
+    GetFile(uuid.UUID) *AquiferJob
     CreateFileDownload(string, string, Dict, Dict) error
     UpdateConfig(map[string]interface{}) error
 }
@@ -934,7 +935,7 @@ func (job *AquiferJob) GetExtracts() (extracts []*Extract, err error) {
             ExtractType: rawExtractAttributes.GetString("extract_type"),
             OffsetField: rawExtractAttributes.GetString("offset_field"),
             OffsetInterval: offsetInterval,
-            TargetJsonSchema: rawExtractAttributes.Get("target_json_schema"),
+            TargetJsonSchema: streamAttributes.Get("target_json_schema"),
             HashSalt: streamAttributes.GetString("hash_salt"),
             HashAlgo: streamAttributes.GetString("hash_algo"),
         }

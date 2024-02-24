@@ -7,7 +7,16 @@ import (
     "encoding/json"
     "encoding/binary"
     "crypto/sha256"
+
+    "golang.org/x/exp/slices"
 )
+
+var SYSTEM_FIELDS = []string{
+    "__sequence",
+    "__idempotent_id",
+    "__aq_file_id",
+    "__aq_file_hash",
+}
 
 func Hash(schema map[string]interface{}, value map[string]interface{}) (hash string, err error) {
     var byteHash []byte
@@ -76,6 +85,9 @@ func hashValue(schema map[string]interface{}, value interface{}) (hash []byte, e
         sort.Strings(keys)
 
         for _, key := range keys {
+            if slices.Contains(SYSTEM_FIELDS, key) {
+                continue
+            }
             itemValue := valueMap[key]
             var itemSchema map[string]interface{}
             if schemaExists {
