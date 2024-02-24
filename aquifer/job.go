@@ -879,15 +879,24 @@ func (job *AquiferJob) GetExtracts() (extracts []*Extract, err error) {
         return
     }
 
+    var query string
+    if job.GetId() != nil {
+        query = fmt.Sprintf("include=stream,schema&filter[job_id]=%s", job.GetId().String())
+    } else {
+        query = fmt.Sprintf(
+            "include=stream,schema&filter[entity_type]=%s&filter[entity_id]=%s",
+            job.GetEntityType(),
+            job.GetEntityId().String())
+    }
+
     var data Dict
     data, err = job.service.Request(
         job.ctx,
         "GET",
-        fmt.Sprintf("/accounts/%s/flows/%s/extracts?include=stream,schema&filter[entity_type]=%s&filter[entity_id]=%s",
+        fmt.Sprintf("/accounts/%s/flows/%s/extracts?%s",
             job.GetAccountId().String(),
             job.GetFlowId().String(),
-            job.GetEntityType(),
-            job.GetEntityId().String()),
+            query),
         RequestOptions{
             Token: token,
         })
