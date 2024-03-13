@@ -93,6 +93,7 @@ type JobInterface interface {
     SendResponse(*AquiferEvent) error
     CreateFile() *AquiferFile
     CreateFileDownload(string, string, Dict, Dict) error
+    GetFileDownload(uuid.UUID) *AquiferFile
     UpdateConfig(map[string]interface{}) error
 }
 
@@ -1124,6 +1125,19 @@ func (job *AquiferJob) CreateFileDownload(relativePath string,
             Body: reqData,
         })
     return
+}
+
+func (job *AquiferJob) GetFileDownload(fileId uuid.UUID) *AquiferFile {
+    return NewAquiferFile(
+        job.service,
+        job.GetCtx(),
+        "rb",
+        false,
+        "file",
+        job.accountId,
+        job.entityType,
+        job.entityId,
+        &fileId)
 }
 
 func (job *AquiferJob) getLockPrefix() string {
