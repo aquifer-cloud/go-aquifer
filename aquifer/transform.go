@@ -181,6 +181,20 @@ func transformValue(path []string,
         if handler, handlerExists := handlers[primaryJsonType]; handlerExists {
             return handler(schema, value)
         }
+        if primaryJsonType == "object" || primaryJsonType == "array" {
+            switch value.(type) {
+            case string:
+                err = Unmarshal([]byte(value.(string)), &value)
+                if err != nil {
+                    return
+                }
+            case []byte:
+                err = Unmarshal(value.([]byte), &value)
+                if err != nil {
+                    return
+                }
+            }
+        }
         if primaryJsonType == "object" {
             valueMap, assertionOk := value.(map[string]interface{})
             if !assertionOk {
