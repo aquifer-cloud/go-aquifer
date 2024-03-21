@@ -1127,8 +1127,8 @@ func (job *AquiferJob) CreateFileDownload(relativePath string,
     return
 }
 
-func (job *AquiferJob) GetFileDownload(fileId uuid.UUID) *AquiferFile {
-    return NewAquiferFile(
+func (job *AquiferJob) GetFileDownload(globalId uuid.UUID) *AquiferFile {
+    file := NewAquiferFile(
         job.service,
         job.GetCtx(),
         "rb",
@@ -1137,7 +1137,9 @@ func (job *AquiferJob) GetFileDownload(fileId uuid.UUID) *AquiferFile {
         job.accountId,
         job.entityType,
         job.entityId,
-        &fileId)
+        nil)
+    file.SetGlobalId(globalId)
+    return file
 }
 
 func (job *AquiferJob) getLockPrefix() string {

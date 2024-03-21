@@ -25,6 +25,7 @@ type AquiferFile struct {
 	entityType string
 	entityId *uuid.UUID
     fileId *uuid.UUID
+    globalId *uuid.UUID
     mode string
     compression string
     gzipEnabled bool
@@ -86,6 +87,14 @@ func NewAquiferFile(service *AquiferService,
 
 func (file *AquiferFile) GetId() *uuid.UUID {
 	return file.fileId
+}
+
+func (file *AquiferFile) GetGlobalId() *uuid.UUID {
+    return file.globalId
+}
+
+func (file *AquiferFile) SetGlobalId(globalId uuid.UUID) {
+    file.globalId = &globalId
 }
 
 func (file *AquiferFile) Init() error {
@@ -249,22 +258,32 @@ func (file *AquiferFile) ensureDownloadUrl(ctx context.Context) (err error) {
 			return
 		}
 
-		var jobPath string
-		if file.jobType == "file" {
-			jobPath = "files"
+		var filePath string
+		if file.globalId != nil {
+			filePath = fmt.Sprintf(
+				"/accounts/%s/files/download/%s",
+				file.accountId,
+				file.globalId)
 		} else {
-			jobPath = "data"
+			var jobPath string
+			if file.jobType == "file" {
+				jobPath = "files"
+			} else {
+				jobPath = "data"
+			}
+
+			filePath = fmt.Sprintf(
+				"/accounts/%s/%s/%s",
+				file.accountId,
+				jobPath,
+				file.fileId)
 		}
 
 		var data Dict
 		data, err = file.service.Request(
 			ctx,
 			"GET",
-			fmt.Sprintf(
-				"/accounts/%s/%s/%s",
-				file.accountId,
-				jobPath,
-				file.fileId),
+			filePath,
 			RequestOptions{
 				Token: token,
 			})
