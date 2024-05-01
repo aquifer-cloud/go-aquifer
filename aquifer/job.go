@@ -94,6 +94,7 @@ type JobInterface interface {
     CreateFile() *AquiferFile
     CreateFileDownload(string, string, Dict, Dict) error
     GetFileDownload(uuid.UUID) *AquiferFile
+    UpdateDataFreshness(string, string, string, string) error
     UpdateConfig(map[string]interface{}) error
 }
 
@@ -439,7 +440,8 @@ func (job *AquiferJob) GetEntityConfig() Dict {
 func (job *AquiferJob) GetConfig() Dict {
     return job.entityCatalogAttributes.Get("config").Merge(
         job.entityCatalogAttributes.Get("secrets").Merge(
-            job.entityAttributes.Get("config")))
+            job.entityAttributes.Get("config"))).Merge(
+                job.jobAttributes.Get("config"))
 }
 
 func (job *AquiferJob) GetJobAttributes() Dict {
@@ -1140,6 +1142,55 @@ func (job *AquiferJob) GetFileDownload(globalId uuid.UUID) *AquiferFile {
         nil)
     file.SetGlobalId(globalId)
     return file
+}
+
+func (job *AquiferJob) UpdateDataFreshness(relativePath string,
+                                           dataFreshness string,
+                                           nativeDataFreshnessField string,
+                                           nativeDataFreshness string) (err error) {
+    var token string
+    token, err = job.service.GetEntityToken(job.GetCtx(), job.accountId, job.entityType, job.entityId)
+    if err != nil {
+        return
+    }
+
+    attributes := make(Dict).
+        SetString("data_freshness", dataFreshness)
+
+    if nativeDataFreshnessField != "" {
+        attributes = attributes.
+            SetString("native_data_freshness_field", nativeDataFreshnessField).
+            SetString("native_data_freshness", nativeDataFreshness)
+    }
+
+    reqData := make(Dict).
+        Set("data", make(Dict).
+            SetString("type", "data-freshness").
+            Set("attributes", attributes))
+
+    var entityPath string
+    entityPath, err = job.service.GetEntityPath(
+        job.accountId,
+        job.entityType,
+        job.entityId)
+    if err != nil {
+        return
+    }
+
+    _, err = job.service.Request(
+        job.ctx,
+        "PUT",
+        fmt.Sprintf(
+            "/accounts/%s/",
+            job.accountId,
+            entityPath,
+            job.entityId,
+            relativePath),
+        RequestOptions{
+            Token: token,
+            Body: reqData,
+        })
+    return
 }
 
 func (job *AquiferJob) getLockPrefix() string {

@@ -23,6 +23,7 @@ func NewMockDb() map[string]map[string]interface{} {
         "jobs": map[string]interface{}{},
         "extracts": map[string]interface{}{},
         "states": map[string]interface{}{},
+        "flows": map[string]interface{}{},
     }
 }
 
@@ -86,6 +87,28 @@ func NewMockService(mockDb map[string]map[string]interface{}) *AquiferService {
         "=~.*/catalog-types/(datastore|integration)/([^/]+)",
         func(req *http.Request) (resp *http.Response, err error) {
             return httpmock.NewJsonResponse(200, map[string]interface{}{})
+        })
+
+    httpmock.RegisterResponder(
+        "GET",
+        "=~.*/accounts/([^/]+)/flows/([^/]+)",
+        func(req *http.Request) (resp *http.Response, err error) {
+            var flowId string
+            flowId, err = httpmock.GetSubmatch(req, 2)
+            if err != nil {
+                return
+            }
+
+            var found bool
+            var flow interface{}
+            flow, found = mockDb["flows"][flowId]
+            if !found {
+                return httpmock.NewJsonResponse(
+                    404,
+                    map[string]interface{}{})
+            }
+
+            return httpmock.NewJsonResponse(200, flow)
         })
 
     httpmock.RegisterResponder(
@@ -365,6 +388,18 @@ func (databatch *MockDataBatch) NextRecord() (record map[string]interface{}, exi
     return
 }
 
+func (databatch *MockDataBatch) GetCustomMetadata() map[string]interface{} {
+    return nil
+}
+
+func (databatch *MockDataBatch) GetCustomMetadataSchema() map[string]interface{} {
+    return nil
+}
+
+func (databatch *MockDataBatch) GetLastRecordAddedAt() time.Time {
+    return time.Now()
+}
+
 type MockJob struct {
     service *AquiferService
     event AquiferEvent
@@ -519,4 +554,23 @@ func (job *MockJob) CreateFileDownload(relativePath string,
                                           metadata Dict,
                                           metadataSchema Dict) (err error) {
     return
+}
+
+func (job *MockJob) GetEntityConfig() Dict {
+    return job.config
+}
+
+func (job *MockJob) GetFileDownload(globalId uuid.UUID) *AquiferFile {
+    return nil
+}
+
+func (job *MockJob) UpdateDataFreshness(relativePath string,
+                                           dataFreshness string,
+                                           nativeDataFreshnessField string,
+                                           nativeDataFreshness string) (err error) {
+    return nil
+}
+
+func (job *MockJob) UpdateConfig(config map[string]interface{}) (err error) {
+    return nil
 }

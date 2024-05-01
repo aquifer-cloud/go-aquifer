@@ -707,6 +707,68 @@ func (service *AquiferService) GetCli() *cli.App {
                             return service.dataHandler(job)
                         },
                     },
+                    {
+                        Name: "snapshot",
+                        Usage: "Run an snapshot complete job",
+                        Flags: []cli.Flag{
+                            &cli.StringFlag{
+                                Name: "account-id",
+                                Usage: "Account ID for Job",
+                                Required: true,
+                            },
+                            &cli.StringFlag{
+                                Name: "entity-type",
+                                Usage: "Entity type for Job - integration, datastore, processor, or blobstore",
+                                Required: true,
+                            },
+                            &cli.StringFlag{
+                                Name: "entity-id",
+                                Usage: "Entity ID for Job",
+                                Required: true,
+                            },
+                            &cli.StringFlag{
+                                Name: "flow-id",
+                                Usage: "Flow ID for Job",
+                                Required: true,
+                            },
+                            &cli.StringFlag{
+                                Name: "job-id",
+                                Usage: "ID for Job",
+                            },
+                            dryRunFlag,
+                        },
+                        Action: func(cCtx *cli.Context) error {
+                            accountIdStr := cCtx.String("account-id")
+                            entityType := cCtx.String("entity-type")
+                            entityIdStr := cCtx.String("entity-id")
+                            flowIdStr := cCtx.String("flow-id")
+                            jobIdStr := cCtx.String("job-id")
+                            accountDeployment := cCtx.Bool("account-deployment")
+
+                            if accountDeployment {
+                                service.SetIsAccountDeployment(accountDeployment)
+                            }
+
+                            job, err := NewJobFromCLI(
+                                service,
+                                context.Background(),
+                                "snapshot",
+                                accountIdStr,
+                                flowIdStr,
+                                entityType,
+                                entityIdStr,
+                                jobIdStr)
+                            if err != nil {
+                                return err
+                            }
+                            err = job.Lock()
+                            if err != nil {
+                                return err
+                            }
+
+                            return service.snapshotCompleteHandler(job)
+                        },
+                    },
                 },
             },
         },
