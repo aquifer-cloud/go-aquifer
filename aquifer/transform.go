@@ -139,6 +139,18 @@ func transformValue(path []string,
         if handler, handlerExists := handlers[format]; handlerExists {
             return handler(schema, value)
         }
+        switch format {
+        case "date":
+            value, err = time.Parse("2006-01-02", strings.Split(value.(string), "T")[0])
+            if err != nil {
+                return
+            }
+        case "date-time":
+            value, err = time.Parse(time.RFC3339Nano, value.(string))
+            if err != nil {
+                return
+            }
+        }
     }
 
     if jsonTypeRaw, jsonTypeExists := schema["type"]; jsonTypeExists {
