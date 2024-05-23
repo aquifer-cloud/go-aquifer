@@ -286,6 +286,8 @@ func transformScalar(path []string,
         default:
             err = fmt.Errorf("Incompatible transformation types: %v %s %T", path, jsonType, value)
         }
+    case time.Time:
+        out, err = ValueToString(value)
     case json.Number:
         valueJson := value.(json.Number)
         switch jsonType {
