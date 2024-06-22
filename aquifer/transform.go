@@ -141,13 +141,15 @@ func transformValue(path []string,
         }
         switch format {
         case "date":
-            value, err = time.Parse("2006-01-02", strings.Split(value.(string), "T")[0])
-            if err != nil {
+            switch value.(type) {
+            case string:
+                value, err = time.Parse("2006-01-02", strings.Split(value.(string), "T")[0])
                 return
             }
         case "date-time":
-            value, err = time.Parse(time.RFC3339Nano, value.(string))
-            if err != nil {
+            switch value.(type) {
+            case string:
+                value, err = time.Parse(time.RFC3339Nano, value.(string))
                 return
             }
         }
